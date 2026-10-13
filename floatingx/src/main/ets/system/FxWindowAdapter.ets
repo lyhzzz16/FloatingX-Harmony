@@ -1,3 +1,4 @@
+import { FxTouchCancelReason, FxGeometrySnapshot } from '../core/FxTypes';
 import window from '@ohos.window';
 import display from '@ohos.display';
 import abilityAccessCtrl from '@ohos.abilityAccessCtrl';
@@ -28,12 +29,15 @@ class FxSystemBoundary implements FxScopeBoundary {
   constructor(owner: FxSystemOwner) {this.owner=owner;}
   move(point: FxPoint, animate: boolean): Promise<FxPoint> {return this.owner.move(point,animate);}
   moveFrame(point: FxPoint): void {this.owner.moveFrame(point);}
+  cancelPending(): void {this.owner.cancelAnimations();}
+  flush(): Promise<void> {return this.owner.flushGeometry();}
 }
 export class FxSystemPageView implements FxSystemView {
   private engine: FxScopePlatform;
   interactions: FxInteractions;
   private owner: FxSystemOwner;
   private releaseContentSize?: () => void;
+  private releaseContentLayout?: () => void;
   private contentSize: FxSize;
   constructor(owner: FxSystemOwner, context: UIContext, source: FxContentSource, interactions: FxInteractions) {
     this.owner=owner;
@@ -44,6 +48,7 @@ export class FxSystemPageView implements FxSystemView {
       if(size.width===this.contentSize.width && size.height===this.contentSize.height)return;
       this.contentSize={width:size.width,height:size.height};this.owner.layoutContent(this.contentSize);
     });
+    this.releaseContentLayout=this.engine.subscribeLayout((geometry: FxGeometrySnapshot) => {if(geometry.measured)this.owner.layoutContent(geometry.content,true);});
     this.engine.mountHost(context,source);this.engine.layoutHost(owner.getGeometry().viewport.size,owner.getGeometry().viewport.insets);
   }
   async create(): Promise<void> {await this.engine.create();this.owner.attachView(this);}
@@ -60,9 +65,11 @@ export class FxSystemPageView implements FxSystemView {
   show(): Promise<void> {return this.engine.show();} hide(): Promise<void> {return this.engine.hide();}
   async destroy(): Promise<void> {
     if(this.releaseContentSize!==undefined)this.releaseContentSize();this.releaseContentSize=undefined;
+    if(this.releaseContentLayout!==undefined)this.releaseContentLayout();this.releaseContentLayout=undefined;
     try{await this.engine.destroy();}finally{this.owner.detachView();}
   }
-  cancelAnimations(): void {this.engine.cancelAnimations();this.engine.cancelTouch();}
+  cancelTouch(reason: FxTouchCancelReason): void {this.engine.cancelTouch(reason);}
+  cancelAnimations(): void {this.engine.cancelAnimations();}
   adoptPosition(point: FxPoint): void {
     const target=this.owner.getGeometry().viewport;const current=this.engine.getGeometry().viewport;
     if(target.size.width!==current.size.width || target.size.height!==current.size.height || target.insets.left!==current.insets.left || target.insets.top!==current.insets.top || target.insets.right!==current.insets.right || target.insets.bottom!==current.insets.bottom) {

@@ -3,7 +3,7 @@ import { FxPlatform, FxScope, FxEventType } from '../core/FxPlatform';
 import { FxController } from '../core/FxController';
 import { FxConfig } from '../core/FxConfig';
 import { FxError } from '../core/FxError';
-import { FxPoint, FxSize } from '../core/FxTypes';
+import { FxPoint, FxSize, FxGeometrySnapshot, FxLayoutListener, FxTouchCancelReason } from '../core/FxTypes';
 import { FxGeometryInput } from '../geometry/FxGeometry';
 import { FxContentSource } from '../component/FxContent';
 import { FxScopePlatform, FxScopeSnapshot, FxInteractions } from '../scope/FxScopePlatform';
@@ -38,6 +38,9 @@ export class FxAppPlatform implements FxPlatform {
     if(this.controller!==undefined) throw new FxError('INVALID_CONFIG','App platform already bound');
     this.controller=controller; this.engine.bindController(controller,false); this.releaseBinding=this.host.bind(controller); this.syncEligibility();
   }
+  getGeometrySnapshot(): FxGeometrySnapshot {return this.engine.getGeometrySnapshot();}
+  subscribeLayout(listener: FxLayoutListener): () => void {return this.engine.subscribeLayout(listener);}
+  cancelTouch(reason: FxTouchCancelReason): void {this.engine.cancelTouch(reason);}
   getSnapshot(): FxScopeSnapshot { return this.engine.getSnapshot(); }
   getGeometry(): FxGeometryInput { return this.engine.getGeometry(); }
   getPosition(): FxPoint { return this.engine.getPosition(); }

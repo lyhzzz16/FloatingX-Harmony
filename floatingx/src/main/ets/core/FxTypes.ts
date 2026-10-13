@@ -36,3 +36,37 @@ export interface FxPositionRecord {
   viewport: FxSize;
   edge: FxEdge;
 }
+
+/** CONTENT preserves the original Harmony projection; ANDROID_2 uses FloatingX 2.x movement bounds. */
+export enum FxBoundaryMode { CONTENT = 'content', ANDROID_2 = 'android-2' }
+/** Detached values in vp; density converts to native px. Initial declared sizes are not measured sizes. */
+export interface FxGeometrySnapshot {
+  instanceId: number;
+  layoutVersion: number;
+  measured: boolean;
+  coordinateSpace: string;
+  density: number;
+  viewport: FxViewport;
+  content: FxSize;
+  requestedPosition: FxPoint;
+  position: FxPoint;
+  projection: FxProjection;
+}
+export type FxLayoutListener = (snapshot: FxGeometrySnapshot) => void;
+export enum FxTouchPhase { DOWN = 'down', MOVE = 'move', UP = 'up', CANCEL = 'cancel' }
+export enum FxTouchCancelReason {
+  SYSTEM = 'system', HIDDEN = 'hidden', DESTROYED = 'destroyed', HOST_CHANGED = 'host-changed',
+  LAYOUT_CHANGED = 'layout-changed', CONFIG_CHANGED = 'config-changed', MOVED = 'moved'
+}
+export interface FxTouchSnapshot {
+  phase: FxTouchPhase;
+  pointerId: number;
+  startPointer: FxPoint;
+  pointer: FxPoint;
+  delta: FxPoint;
+  startPosition: FxPoint;
+  position: FxPoint;
+  dragged: boolean;
+  cancelReason?: FxTouchCancelReason;
+}
+export enum FxReleaseDecision { DEFAULT = 'default', CONSUMED = 'consumed' }

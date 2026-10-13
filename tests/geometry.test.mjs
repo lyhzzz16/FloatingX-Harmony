@@ -144,3 +144,16 @@ test('projection and restoration do not mutate positions, record, or geometry in
   assert.deepEqual(r, savedRecord);
   assert.deepEqual(structuredClone(i), savedInput);
 });
+
+test('Android 2.3.7 bounds reproduce moveIngBoundary and moveBoundary numeric fixtures',()=>{
+ const i=input({boundaryMode:'android-2',rebound:true,margin:{left:11,right:13,top:17,bottom:19}});
+ i.viewport.insets={left:7,right:9,top:24,bottom:32};i.content={width:80,height:60};
+ assert.deepEqual(bounds(i,true),{minX:0,maxX:220,minY:24,maxY:408});
+ assert.deepEqual(bounds(i,false),{minX:11,maxX:207,minY:41,maxY:389});
+ i.config.halfHide=true;i.config.halfHideRatio=.25;
+ assert.deepEqual(bounds(i,true),{minX:-20,maxX:280,minY:24,maxY:408});
+ assert.deepEqual(bounds(i,false),{minX:-20,maxX:280,minY:41,maxY:389});
+ assert.deepEqual(project({x:280,y:100},i),{position:{x:280,y:100},visibleSize:{width:20,height:60},contentOffset:{x:0,y:0}});
+ assert.deepEqual(project({x:-20,y:100},i),{position:{x:0,y:100},visibleSize:{width:60,height:60},contentOffset:{x:-20,y:0}});
+ i.config.adsorb=false;assert.deepEqual(settle({x:80,y:24},i),{x:80,y:24});
+});

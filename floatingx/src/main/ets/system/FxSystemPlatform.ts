@@ -2,8 +2,8 @@ import { FxPlatform, FxScope, FxEvent, FxEventType, FxEventCallback } from '../c
 import { FxController } from '../core/FxController';
 import { FxConfig } from '../core/FxConfig';
 import { FxError } from '../core/FxError';
-import { FxPoint, FxSize, FxProjection, FxDisplayMode, FxAnimationCurve } from '../core/FxTypes';
-import { FxGeometryInput, initial, clamp, bounds, project, logicalEdge, remap } from '../geometry/FxGeometry';
+import { FxPoint, FxSize, FxProjection, FxDisplayMode, FxAnimationCurve, FxGeometrySnapshot, FxLayoutListener, FxTouchCancelReason, FxBoundaryMode } from '../core/FxTypes';
+import { FxGeometryInput, initial, clamp, bounds, project, logicalEdge, remap, snapshot } from '../geometry/FxGeometry';
 import { FxAnimation } from '../component/FxAnimation';
 import { FxNativeWindow, FxWindowFactory, FxSystemView } from './FxNativeWindow';
 export interface FxFrameClock { now(): number; wait(): Promise<void>; cancel(): void; }
@@ -27,6 +27,14 @@ export class FxSystemPlatform implements FxPlatform {
   private position: FxPoint = {x:0,y:0}; private projection: FxProjection;
   private positioned: boolean = false; private destroyed: boolean = false;
   private tail: Promise<void> = Promise.resolve(); private animation: FxAnimation = new FxAnimation(); private clock: FxFrameClock;
+  private layoutVersion: number = 0;
+  private measured: boolean = false;
+  private density: number = 1;
+  private requestedPosition: FxPoint = {x:0,y:0};
+  private layoutListeners: FxLayoutListener[] = [];
+  private releaseFallbackLayout?: () => void;
+  private layoutCompletion: Promise<void> = Promise.resolve();
+  private frameCompletion: Promise<void> = Promise.resolve();
   private pendingFrame?: FxPoint; private frameRunning: boolean = false;
   constructor(factory: FxWindowFactory, input: FxGeometryInput, fallbackFactory?: FxFallbackFactory, onEvent?: FxEventCallback, clock: FxFrameClock = new FxNativeClock()) {
     this.factory=factory;this.input={viewport:input.viewport,content:input.content,config:input.config===undefined?new FxConfig():input.config.copy()};
@@ -40,13 +48,30 @@ export class FxSystemPlatform implements FxPlatform {
   isReadyToShow(): boolean {return this.fallback!==undefined ? this.fallback.isReadyToShow===undefined || this.fallback.isReadyToShow():this.native!==undefined && (!this.native.requiresView || this.view!==undefined);}
   getPosition(): FxPoint {return this.fallback!==undefined && this.fallback.getPosition!==undefined ? this.fallback.getPosition():{x:this.position.x,y:this.position.y};}
   getGeometry(): FxGeometryInput {return this.fallback!==undefined && this.fallback.getGeometry!==undefined?this.fallback.getGeometry():this.input;}
+  getGeometrySnapshot(): FxGeometrySnapshot {
+    if(this.fallback!==undefined && this.fallback.getGeometrySnapshot!==undefined)return this.fallback.getGeometrySnapshot();
+    return snapshot(this.input,this.position,this.projection,this.requestedPosition,this.layoutVersion,this.measured,this.density,'display');
+  }
+  subscribeLayout(listener: FxLayoutListener): () => void {
+    this.layoutListeners.push(listener);
+    return () => {const i=this.layoutListeners.indexOf(listener);if(i>=0)this.layoutListeners.splice(i,1);};
+  }
+  private notifyLayout(): void {
+    this.layoutVersion++;const listeners=this.layoutListeners.slice();
+    for(let i=0;i<listeners.length;i++) {try{listeners[i](this.getGeometrySnapshot());}catch(_){if(this.controller!==undefined)this.controller.reportCallbackFailure();}}
+  }
+  async flushGeometry(): Promise<void> {if(this.fallback!==undefined && this.fallback.flushGeometry!==undefined)await this.fallback.flushGeometry();await this.frameCompletion;await this.layoutCompletion;await this.tail;this.assertAlive();}
+  cancelTouch(reason: FxTouchCancelReason): void {
+    if(this.view!==undefined && this.view.cancelTouch!==undefined)this.view.cancelTouch(reason);
+    if(this.fallback!==undefined && this.fallback.cancelTouch!==undefined)this.fallback.cancelTouch(reason);
+  }
   getProjection(): FxProjection {return this.projection;}
   async create(): Promise<void> {
     this.assertAlive();if(this.native!==undefined || this.fallbackCreated)return;
     if(this.fallback!==undefined){await this.createFallback();return;}
     try {
       await this.factory.checkAccess();this.assertAlive();this.native=await this.factory.create();this.assertAlive();
-      this.releaseNative=this.native.subscribe(() => {this.cancelAnimations();this.observe(this.move(this.position,false));});
+      this.releaseNative=this.native.subscribe(() => {this.cancelTouch(FxTouchCancelReason.HOST_CHANGED);this.cancelAnimations();this.observe(this.move(this.position,false));});
       await this.native.load(this);await this.native.setBackground('#00000000');
       await this.native.setTouchable(this.input.config.displayMode!==FxDisplayMode.DisplayOnly);
       await this.enqueueNative(async () => {await this.projectNative(initial(this.input));this.positioned=false;});
@@ -56,6 +81,7 @@ export class FxSystemPlatform implements FxPlatform {
         this.fallback=this.fallbackFactory();this.fallbackCause=cause as FxError;
         if(this.controller!==undefined && this.fallback.bindController!==undefined)this.fallback.bindController(this.controller);
         if(this.fallback.subscribeLifecycle!==undefined)this.releaseFallback=this.fallback.subscribeLifecycle((type: FxEventType) => this.lifecycle(type));
+        if(this.fallback.subscribeLayout!==undefined)this.releaseFallbackLayout=this.fallback.subscribeLayout(() => this.notifyLayout());
         await this.createFallback();
         return;
       }
@@ -75,7 +101,7 @@ export class FxSystemPlatform implements FxPlatform {
   }
   async applyConfig(config: FxConfig): Promise<void> {
     this.assertAlive();if(this.fallback!==undefined){await this.fallback.applyConfig(config);this.input.config=config.copy();return;}
-    const next=config.copy();this.cancelAnimations();
+    const next=config.copy();this.cancelTouch(FxTouchCancelReason.CONFIG_CHANGED);this.cancelAnimations();
     await this.enqueueNative(async () => {
       this.assertAlive();const previous=this.input.config;this.input.config=next;
       try {await this.requireNative().setTouchable(next.displayMode!==FxDisplayMode.DisplayOnly);await this.projectNative(this.positioned?clamp(this.position,bounds(this.input)):initial(this.input));if(this.view!==undefined)await this.view.applyConfig(next);}
@@ -83,13 +109,13 @@ export class FxSystemPlatform implements FxPlatform {
     });
   }
   async show(): Promise<void> {this.assertAlive();if(this.fallback!==undefined)return this.fallback.show();if(this.view!==undefined)await this.view.show();try{await this.requireNative().show();}catch(error){if(this.view!==undefined)await this.view.hide();throw error as Error;}}
-  async hide(): Promise<void> {this.cancelAnimations();if(this.fallback!==undefined)return this.fallback.hide();if(this.native!==undefined){await this.native.hide();if(this.view!==undefined)await this.view.hide();}}
+  async hide(): Promise<void> {this.cancelTouch(FxTouchCancelReason.HIDDEN);this.cancelAnimations();if(this.fallback!==undefined)return this.fallback.hide();if(this.native!==undefined){await this.native.hide();if(this.view!==undefined)await this.view.hide();}}
   async move(point: FxPoint, animate: boolean): Promise<FxPoint> {
     this.pendingFrame=undefined;this.clock.cancel();return this.runMove(point,animate);
   }
-  private async runMove(point: FxPoint, animate: boolean): Promise<FxPoint> {
+  private async runMove(point: FxPoint, animate: boolean, dragging: boolean = false): Promise<FxPoint> {
     this.assertAlive();if(this.fallback!==undefined)return this.fallback.move(point,animate);
-    const token=this.animation.begin();const target=clamp(point,bounds(this.input));const start=this.getPosition();const startTime=this.clock.now();
+    const token=this.animation.begin();const target=clamp(point,bounds(this.input,dragging));const start=this.getPosition();const startTime=this.clock.now();
     const duration=animate && this.input.config.animation.enabled ? this.input.config.animation.durationMs:0;
     do {
       if(!this.animation.isCurrent(token))return this.getPosition();
@@ -102,23 +128,29 @@ export class FxSystemPlatform implements FxPlatform {
   /** Coalesce drag frames while one native transaction is in flight. Final settle uses awaited move. */
   moveFrame(point: FxPoint): void {
     this.pendingFrame=point;if(this.frameRunning)return;this.frameRunning=true;
-    this.observe(this.drainFrames().finally(() => {this.frameRunning=false;if(this.pendingFrame!==undefined && !this.destroyed)this.moveFrame(this.pendingFrame);}));
+    this.frameCompletion=this.drainFrames().finally(() => {this.frameRunning=false;if(this.pendingFrame!==undefined && !this.destroyed)this.moveFrame(this.pendingFrame);});this.observe(this.frameCompletion);
   }
-  private async drainFrames(): Promise<void> {while(this.pendingFrame!==undefined && !this.destroyed){const point=this.pendingFrame;this.pendingFrame=undefined;await this.runMove(point,false);}}
+  private async drainFrames(): Promise<void> {while(this.pendingFrame!==undefined && !this.destroyed){const point=this.pendingFrame;this.pendingFrame=undefined;await this.runMove(point,false,true);}}
   cancelAnimations(): void {this.animation.cancel();this.clock.cancel();this.pendingFrame=undefined;if(this.view!==undefined)this.view.cancelAnimations();if(this.fallback!==undefined && this.fallback.cancelAnimations!==undefined)this.fallback.cancelAnimations();}
-  layoutContent(size: FxSize): void {
-    if(this.destroyed || size.width<=0 || size.height<=0 || size.width===this.input.content.width && size.height===this.input.content.height)return;
-    const next: FxSize={width:size.width,height:size.height};this.cancelAnimations();
-    this.observe(this.enqueueNative(async () => {
+  layoutContent(size: FxSize, applied: boolean = false): void {
+    if(this.destroyed || size.width<=0 || size.height<=0)return;
+    const changed=size.width!==this.input.content.width || size.height!==this.input.content.height;
+    if(!changed && !applied)return;
+    const next: FxSize={width:size.width,height:size.height};
+    if(changed){this.cancelTouch(FxTouchCancelReason.LAYOUT_CHANGED);this.cancelAnimations();}
+    this.layoutCompletion=this.enqueueNative(async () => {
       if(this.destroyed)return;const previous=this.input.content;this.input.content=next;
-      try{await this.projectNative(this.position);}catch(error){this.input.content=previous;throw error as Error;}
-    }));
+      try {
+        if(changed)await this.projectNative(this.position);
+        if(applied){this.measured=true;this.notifyLayout();}
+      }catch(error){this.input.content=previous;throw error as Error;}
+    });this.observe(this.layoutCompletion);
   }
   reportError(error: Error): void {if(this.controller!==undefined)this.controller.reportError(error);}
   async destroy(): Promise<void> {
-    if(this.destroyed)return;this.destroyed=true;this.cancelAnimations();
+    if(this.destroyed)return;this.destroyed=true;this.cancelTouch(FxTouchCancelReason.DESTROYED);this.cancelAnimations();
     try {if(this.fallback!==undefined)await this.fallback.destroy();else {await this.tail;await this.cleanupNative();}}
-    finally {if(this.releaseFallback!==undefined)this.releaseFallback();this.releaseFallback=undefined;this.controller=undefined;this.listeners=[];this.fallback=undefined;}
+    finally {if(this.releaseFallbackLayout!==undefined)this.releaseFallbackLayout();this.releaseFallbackLayout=undefined;if(this.releaseFallback!==undefined)this.releaseFallback();this.releaseFallback=undefined;this.controller=undefined;this.listeners=[];this.layoutListeners=[];this.fallback=undefined;}
   }
   private enqueueProjection(point: FxPoint, token: number): Promise<void> {
     return this.enqueueNative(async () => {if(!this.destroyed && this.animation.isCurrent(token))await this.projectNative(point,token);});
@@ -130,9 +162,15 @@ export class FxSystemPlatform implements FxPlatform {
     const native=this.requireNative();const viewport=native.getViewport();if(!Number.isFinite(viewport.density)||viewport.density<=0)throw new FxError('INVALID_GEOMETRY','Invalid target display density');
     const oldViewport=this.input.viewport;const oldLimits=bounds(this.input);const edge=logicalEdge(point,this.input);
     this.input.viewport={size:{width:viewport.size.width,height:viewport.size.height},insets:{left:viewport.insets.left,top:viewport.insets.top,right:viewport.insets.right,bottom:viewport.insets.bottom}};
-    const logical=this.positioned ? remap(point,oldLimits,edge,bounds(this.input)) : clamp(point,bounds(this.input));
+    const changed=oldViewport.size.width!==viewport.size.width || oldViewport.size.height!==viewport.size.height ||
+      oldViewport.insets.left!==viewport.insets.left || oldViewport.insets.top!==viewport.insets.top ||
+      oldViewport.insets.right!==viewport.insets.right || oldViewport.insets.bottom!==viewport.insets.bottom || this.density!==viewport.density;
+    const logical=this.input.config.boundaryMode===FxBoundaryMode.ANDROID_2 && !changed ? {x:point.x,y:point.y} :
+      (this.positioned ? remap(point,oldLimits,edge,bounds(this.input)) : clamp(point,bounds(this.input)));
+    this.requestedPosition={x:logical.x,y:logical.y};
     const projection=project(logical,this.input);const d=viewport.density;
     const size: FxSize={width:Math.round(projection.visibleSize.width*d),height:Math.round(projection.visibleSize.height*d)};
+    if(size.width<=0 || size.height<=0)throw new FxError('CAPABILITY_UNSUPPORTED','Native window requires a positive visible slice');
     const previous=native.getRect();
     try {
       await native.resize(size);
@@ -146,7 +184,9 @@ export class FxSystemPlatform implements FxPlatform {
       if(actual.width!==size.width||actual.height!==size.height)throw new FxError('CAPABILITY_UNSUPPORTED','Native window cannot represent requested visible slice');
       this.position={x:logical.x+(actual.x/d-projection.position.x),y:logical.y+(actual.y/d-projection.position.y)};
       this.positioned=true;this.projection={position:{x:actual.x/d,y:actual.y/d},visibleSize:projection.visibleSize,contentOffset:projection.contentOffset};
+      this.density=d;
       if(this.view!==undefined)this.view.adoptPosition(this.position);
+      if(changed)this.notifyLayout();
     } catch(error) {
       this.input.viewport=oldViewport;
       if(this.cancelIfTerminated(native))throw error as Error;

@@ -1,6 +1,6 @@
 import { FxConfig } from './FxConfig';
 import { FxError } from './FxError';
-import { FxPoint } from './FxTypes';
+import { FxPoint, FxGeometrySnapshot, FxLayoutListener, FxTouchCancelReason } from './FxTypes';
 
 export enum FxScope { SCOPE = 'scope', APP = 'app', SYSTEM = 'system' }
 export enum FxState {
@@ -25,6 +25,10 @@ export interface FxLogger { error(error: FxError): void; }
  */
 export interface FxPlatform {
   readonly actualScope?: FxScope;
+  getGeometrySnapshot?(): FxGeometrySnapshot;
+  subscribeLayout?(listener: FxLayoutListener): () => void;
+  flushGeometry?(): Promise<void>;
+  cancelTouch?(reason: FxTouchCancelReason): void;
   create(): Promise<void>;
   show(): Promise<void>;
   hide(): Promise<void>;

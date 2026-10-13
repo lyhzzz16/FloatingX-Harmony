@@ -1,6 +1,6 @@
 import { FxConfig } from './FxConfig';
 import { FxError } from './FxError';
-import { FxPoint, FxPositionRecord } from './FxTypes';
+import { FxPoint, FxPositionRecord, FxGeometrySnapshot, FxLayoutListener, FxTouchCancelReason } from './FxTypes';
 import { FxGeometryInput, logicalEdge } from '../geometry/FxGeometry';
 import { FxStorageOptions, storageError } from '../storage/FxStorage';
 import { FxPositionSession } from '../storage/FxPositionSession';
@@ -32,9 +32,13 @@ function normalizeError(error: Error, code: string = 'WINDOW_OPERATION_FAILED'):
   return new FxError(code, message, platformCode);
 }
 
+let instanceSequence: number = 0;
+
 /** Serial native operations, immediate cancellation, independent user and host intent. */
 export class FxController {
   private platform?: FxPlatform;
+  private readonly instanceId: number = ++instanceSequence;
+  private layoutSubscriptions: (() => void)[] = [];
   private config: FxConfig;
   private onEvent?: FxEventCallback;
   private logger: FxLogger;
@@ -82,6 +86,7 @@ export class FxController {
   }
 
   hide(): Promise<void> {
+    this.cancelTouch(FxTouchCancelReason.HIDDEN);
     this.interruptAnimations();
     const generation = this.generation;
     return this.enqueue(async (events: FxEvent[]) => {
@@ -93,7 +98,7 @@ export class FxController {
 
   setHostVisible(visible: boolean): Promise<void> {
     if (this.state === FxState.DESTROYING || this.state === FxState.DESTROYED) return Promise.reject(this.destroyedError());
-    if (!visible) this.interruptAnimations();
+    if (!visible) {this.cancelTouch(FxTouchCancelReason.HOST_CHANGED);this.interruptAnimations();}
     // Physical host state is immediate; queued earlier notifications must never resurrect it.
     if (this.hostVisible !== visible) this.attachmentEpoch++;
     this.hostVisible = visible;
@@ -106,7 +111,6 @@ export class FxController {
 
   cancel(): Promise<void> {
     if (this.cancellation !== undefined) return this.cancellation;
-    this.interruptAnimations();
     this.generation++;
     if (this.positionSession !== undefined) this.positionSession.close();
     this.wanted = false;
@@ -129,10 +133,15 @@ export class FxController {
         this.pendingMove = undefined;
         this.positionSession = undefined;
         this.geometry = undefined;
+        for(let i=0;i<this.layoutSubscriptions.length;i++)this.layoutSubscriptions[i]();
+        this.layoutSubscriptions=[];
         this.platform = undefined;
         this.state = FxState.DESTROYED;
       }
     }, undefined, true);
+    // Publish the shared cancellation before callbacks can reenter cancel().
+    this.cancelTouch(FxTouchCancelReason.DESTROYED);
+    this.interruptAnimations();
     // Detach callback references after the final destroy/error notification.
     this.cancellation.then(() => { this.onEvent = undefined; }, () => { this.onEvent = undefined; });
     return this.cancellation;
@@ -203,6 +212,30 @@ export class FxController {
     return { viewport: input.viewport, content: input.content, config: this.config };
   }
 
+  getGeometrySnapshot(): FxGeometrySnapshot | undefined {
+    if(this.platform===undefined || this.platform.getGeometrySnapshot===undefined)return undefined;
+    const result=this.platform.getGeometrySnapshot();result.instanceId=this.instanceId;return result;
+  }
+  subscribeLayout(listener: FxLayoutListener): () => void {
+    this.assertAlive(this.generation);const platform=this.requirePlatform();
+    if(platform.subscribeLayout===undefined)throw new FxError('CAPABILITY_UNSUPPORTED','Layout observation is unavailable');
+    const release=platform.subscribeLayout((_snapshot: FxGeometrySnapshot) => {
+      const current=this.getGeometrySnapshot();
+      if(current!==undefined && this.state!==FxState.DESTROYING && this.state!==FxState.DESTROYED) {
+        try {listener(current);} catch(_) {this.reportCallbackFailure();}
+      }
+    });
+    this.layoutSubscriptions.push(release);
+    return () => {const i=this.layoutSubscriptions.indexOf(release);if(i>=0){this.layoutSubscriptions.splice(i,1);release();}};
+  }
+  async flushGeometry(): Promise<void> {
+    const generation=this.generation;this.assertAlive(generation);
+    const platform=this.requirePlatform();if(platform.flushGeometry!==undefined)await platform.flushGeometry();
+    this.assertAlive(generation);
+  }
+  cancelTouch(reason: FxTouchCancelReason): void {
+    if(this.platform!==undefined && this.platform.cancelTouch!==undefined)this.platform.cancelTouch(reason);
+  }
   getX(): number { this.readPositionSafely(); return this.position.x; }
   getY(): number { this.readPositionSafely(); return this.position.y; }
   isShow(): boolean { return this.visible; }
@@ -279,6 +312,7 @@ export class FxController {
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       return Promise.reject(new FxError('INVALID_GEOMETRY', 'Move coordinates must be finite'));
     }
+    this.cancelTouch(FxTouchCancelReason.MOVED);
     this.interruptAnimations();
     if (this.positionSession !== undefined) this.positionSession.markUserMove();
     const pending = this.pendingMove;

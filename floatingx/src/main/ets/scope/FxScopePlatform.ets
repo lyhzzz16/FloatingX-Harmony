@@ -4,19 +4,25 @@ import { FxPlatform, FxScope, FxEventType } from '../core/FxPlatform';
 import { FxController } from '../core/FxController';
 import { FxConfig } from '../core/FxConfig';
 import { FxError } from '../core/FxError';
-import { FxPoint, FxSize, FxInsets, FxViewport, FxProjection, FxDisplayMode, FxAnimationCurve } from '../core/FxTypes';
-import { FxGeometryInput, initial, clamp, bounds, settle, project, logicalEdge, remap } from '../geometry/FxGeometry';
+import { FxPoint, FxSize, FxInsets, FxViewport, FxProjection, FxDisplayMode, FxAnimationCurve, FxBoundaryMode, FxGeometrySnapshot, FxLayoutListener, FxTouchPhase, FxTouchSnapshot, FxTouchCancelReason, FxReleaseDecision } from '../core/FxTypes';
+import { FxGeometryInput, initial, clamp, bounds, settle, project, logicalEdge, remap, snapshot } from '../geometry/FxGeometry';
 import { FxContentSource, FxContentMount } from '../component/FxContent';
 import { FxTouch, FxPointer, FxTouchResult } from '../component/FxTouch';
 import { FxAnimation } from '../component/FxAnimation';
 
 export interface FxScopeBoundary {
   displayPointers: boolean;
+  cancelPending?(): void;
+  flush?(): Promise<void>;
   move(point: FxPoint, animate: boolean): Promise<FxPoint>;
   moveFrame(point: FxPoint): void;
 }
 export interface FxDragArea { x: number; y: number; width: number; height: number; }
 export interface FxInteractions {
+  /** Observes a primary pointer in absolute vp; no return value changes input dispatch. */
+  onTouch?: (event: FxTouchSnapshot) => void | Promise<void>;
+  /** Synchronous release decision before settling/saving. CONSUMED also suppresses this surface's click. */
+  onRelease?: (event: FxTouchSnapshot) => FxReleaseDecision;
   dragArea?: FxDragArea;
   onClick?: () => void | Promise<void>;
   onLongPress?: () => void | Promise<void>;
@@ -53,6 +59,11 @@ export class FxScopePlatform implements FxPlatform {
   private interactionGeneration: number = 0;
   private touch: FxTouch = new FxTouch('Normal',8,300,500);
   private primary?: FxPointer;
+  private downPointer?: FxPointer;
+  private downPosition: FxPoint = {x:0,y:0};
+  private layoutVersion: number = 0;
+  private measured: boolean = false;
+  private layoutListeners: FxLayoutListener[] = [];
   private dragged: boolean = false;
   private longPressTimer: number = -1;
   interactions: FxInteractions;
@@ -62,6 +73,19 @@ export class FxScopePlatform implements FxPlatform {
   bindController(controller: FxController, managesHostVisibility: boolean = true): void { this.controller = controller; this.managesHostVisibility=managesHostVisibility; }
   getSnapshot(): FxScopeSnapshot { return this.snapshot; }
   getGeometry(): FxGeometryInput { return {viewport:this.viewport,content:this.snapshot.size,config:this.snapshot.config}; }
+  getGeometrySnapshot(): FxGeometrySnapshot {
+    return snapshot(this.getGeometry(),this.position,this.snapshot.projection,this.position,
+      this.layoutVersion,this.measured,this.context===undefined ? 1:this.context.vp2px(1),'host');
+  }
+  subscribeLayout(listener: FxLayoutListener): () => void {
+    this.layoutListeners.push(listener);
+    return () => {const i=this.layoutListeners.indexOf(listener);if(i>=0)this.layoutListeners.splice(i,1);};
+  }
+  private notifyLayout(): void {
+    this.layoutVersion++;
+    const listeners=this.layoutListeners.slice();
+    for(let i=0;i<listeners.length;i++) this.runCallback(() => listeners[i](this.getGeometrySnapshot()));
+  }
   getPosition(): FxPoint { return {x:this.position.x,y:this.position.y}; }
   isHostVisible(): boolean { return this.context !== undefined && this.hostReady; }
   subscribe(listener: () => void): () => void {
@@ -81,7 +105,7 @@ export class FxScopePlatform implements FxPlatform {
   }
   layoutHost(size: FxSize, insets: FxInsets = {left:0,top:0,right:0,bottom:0}): void {
     if(this.destroyed || size.width<=0 || size.height<=0) return;
-    this.cancelAnimations(); this.cancelTouch();
+    this.cancelAnimations(); this.cancelTouch(FxTouchCancelReason.LAYOUT_CHANGED);
     const previous=bounds(this.getGeometry()); const edge=logicalEdge(this.position,this.getGeometry());
     const remapPosition=this.positioned && this.hostReady;
     this.viewport.size={width:size.width,height:size.height};
@@ -89,20 +113,25 @@ export class FxScopePlatform implements FxPlatform {
     this.hostReady=true;
     if(this.created) this.attachContent();
     if(this.positioned) this.position=remapPosition ? remap(this.position,previous,edge,bounds(this.getGeometry())) : clamp(this.position,bounds(this.getGeometry()));
-    this.refresh();
+    this.refresh(); this.notifyLayout();
     if(this.controller !== undefined && this.managesHostVisibility) this.controller.setHostVisible(true).catch(() => {});
   }
-  layoutContent(size: FxSize): void {
+  layoutContent(size: FxSize, applied: boolean = false): void {
     if(this.destroyed)return;
     if(this.mount!==undefined && this.mount.measure!==undefined) {
       const full=this.mount.measure();if(full===undefined)return;size=full;
     }
-    if(size.width<=0 || size.height<=0 || (size.width===this.snapshot.size.width && size.height===this.snapshot.size.height)) return;
-    this.cancelAnimations(); this.cancelTouch(); this.snapshot.size={width:size.width,height:size.height};
+    if(size.width<=0 || size.height<=0) return;
+    if(applied) this.measured=true;
+    if(size.width===this.snapshot.size.width && size.height===this.snapshot.size.height) {
+      if(applied)this.notifyLayout(); return;
+    }
+    this.cancelAnimations(); this.cancelTouch(FxTouchCancelReason.LAYOUT_CHANGED); this.snapshot.size={width:size.width,height:size.height};
     if(this.positioned) this.position=clamp(this.position,bounds(this.getGeometry())); this.refresh();
+    if(applied)this.notifyLayout();
   }
   unmountHost(): void {
-    this.cancelAnimations(); this.cancelTouch(); this.snapshot.visible=false;
+    this.cancelAnimations(); this.cancelTouch(FxTouchCancelReason.HOST_CHANGED); this.snapshot.visible=false; this.measured=false;
     this.context=undefined; this.hostReady=false;
     if(this.attached) { this.attached=false; this.lifecycle(FxEventType.DETACH); }
     if(this.controller !== undefined && this.managesHostVisibility) this.controller.setHostVisible(false).catch(() => {});
@@ -116,7 +145,7 @@ export class FxScopePlatform implements FxPlatform {
     this.created=true; this.attachContent();
   }
   async applyConfig(config: FxConfig): Promise<void> {
-    this.cancelAnimations(); this.cancelTouch(); this.snapshot.config=config.copy();
+    this.cancelAnimations(); this.cancelTouch(FxTouchCancelReason.CONFIG_CHANGED); this.snapshot.config=config.copy();
     this.touch=new FxTouch(config.displayMode,8,config.clickIntervalMs,500);
     this.position=this.positioned ? clamp(this.position,bounds(this.getGeometry())) : initial(this.getGeometry());
     this.positioned=true; this.refresh();
@@ -128,7 +157,7 @@ export class FxScopePlatform implements FxPlatform {
   }
   async hide(beforeHidden?: () => void): Promise<void> {
     const visible=this.snapshot.visible; const opacity=this.snapshot.opacity;
-    this.cancelAnimations(); this.cancelTouch();
+    this.cancelAnimations(); this.cancelTouch(FxTouchCancelReason.HIDDEN);
     await this.animate(() => { this.snapshot.opacity=0; this.refresh(); },this.snapshot.config.animation.enabled);
     try { if(beforeHidden!==undefined) beforeHidden(); }
     catch(error) { this.snapshot.visible=visible; this.snapshot.opacity=opacity; this.refresh(); throw error as Error; }
@@ -141,12 +170,12 @@ export class FxScopePlatform implements FxPlatform {
     return this.getPosition();
   }
   async destroy(): Promise<void> {
-    this.cancelAnimations(); this.cancelTouch(); this.snapshot.visible=false;
+    this.cancelAnimations(); this.cancelTouch(FxTouchCancelReason.DESTROYED); this.snapshot.visible=false;
     if(this.attached) { this.attached=false; this.lifecycle(FxEventType.DETACH); }
     try { this.releaseContent(); }
     finally {
       this.created=false; this.destroyed=true; this.context=undefined; this.hostReady=false; this.source=undefined;
-      this.refresh(); this.listeners=[]; this.lifecycleListeners=[]; this.controller=undefined;
+      this.refresh(); this.listeners=[]; this.lifecycleListeners=[]; this.layoutListeners=[]; this.controller=undefined;
     }
   }
   cancelAnimations(): void {
@@ -156,41 +185,102 @@ export class FxScopePlatform implements FxPlatform {
   }
   hasPrimaryPointer(): boolean {return this.primary!==undefined;}
   handleTouch(event: TouchEvent): void {
-    if(this.snapshot.config.displayMode===FxDisplayMode.DisplayOnly) return;
-    if(event.type===TouchType.Cancel) { const wasDragged=this.dragged; this.cancelTouch(); if(wasDragged) this.settleDrag(); return; }
+    if(this.destroyed || this.context===undefined || !this.snapshot.visible || this.snapshot.config.displayMode===FxDisplayMode.DisplayOnly) return;
+    if(event.type===TouchType.Cancel) {
+      const released=this.touchSnapshot(FxTouchPhase.CANCEL,FxTouchCancelReason.SYSTEM);
+      const wasDragged=this.dragged;
+      this.resetTouch();
+      if(released!==undefined)this.finishTouch(released,wasDragged);
+      return;
+    }
     const changes=event.changedTouches;
     for(let i=0;i<changes.length;i++) {
       const native=changes[i];
       const pointer: FxPointer={id:native.id,x:this.boundary!==undefined && this.boundary.displayPointers?native.displayX:native.windowX,y:this.boundary!==undefined && this.boundary.displayPointers?native.displayY:native.windowY,timeMs:event.timestamp/1000000};
       if(event.type===TouchType.Down) {
         if(this.primary!==undefined) continue;
-        this.cancelAnimations(); this.primary=pointer; this.dragged=false;
+        this.cancelAnimations(); this.primary=pointer; this.downPointer=pointer; this.downPosition=this.getPosition(); this.dragged=false;
         this.touch.down(pointer,this.position);
         this.longPressTimer=setTimeout(() => {
           if(this.primary===undefined) return;
           const current=this.primary;
           this.deliver(this.touch.move({id:current.id,x:current.x,y:current.y,timeMs:pointer.timeMs+500}));
         },500);
-      } else if(event.type===TouchType.Move) {
-        if(this.primary!==undefined && pointer.id===this.primary.id) this.primary=pointer;
-        this.deliver(this.touch.move(pointer));
-      } else if(event.type===TouchType.Up) {
-        const primary=this.primary!==undefined && pointer.id===this.primary.id;
-        const result=this.touch.up(pointer);
-        if(primary && result.kind==='end' && (result.position.x!==this.position.x || result.position.y!==this.position.y)) {
-          this.position=result.position; this.dragged=true; this.refresh();
-          if(this.boundary!==undefined)this.boundary.moveFrame(this.position);
+        this.observeTouch(this.touchSnapshot(FxTouchPhase.DOWN));
+      } else if(this.primary!==undefined && pointer.id===this.primary.id) {
+        this.primary=pointer;
+        if(event.type===TouchType.Move) {
+          this.deliver(this.touch.move(pointer));
+          this.observeTouch(this.touchSnapshot(FxTouchPhase.MOVE));
+        } else if(event.type===TouchType.Up) {
+          const result=this.touch.up(pointer);
+          if(result.kind==='end' && (result.position.x!==this.position.x || result.position.y!==this.position.y)) {
+            this.position=this.dragPosition(result.position); this.dragged=true; this.refresh();
+            if(this.boundary!==undefined)this.boundary.moveFrame(this.position);
+          }
+          const released=this.touchSnapshot(FxTouchPhase.UP);
+          const wasDragged=this.dragged;
+          this.resetTouch();
+          if(released!==undefined)this.finishTouch(released,wasDragged,result);
         }
-        this.deliver(result);
-        if(primary) { const wasDragged=this.dragged; this.cancelTouch(); if(wasDragged) this.settleDrag(); }
       }
     }
   }
-  cancelTouch(): void { this.touch.cancel(); this.primary=undefined; clearTimeout(this.longPressTimer); this.longPressTimer=-1; this.dragged=false; }
+  /** Terminates the primary pointer once; lifecycle cancellation never settles or clicks. */
+  cancelTouch(reason: FxTouchCancelReason = FxTouchCancelReason.HOST_CHANGED): void {
+    const event=this.touchSnapshot(FxTouchPhase.CANCEL,reason);
+    this.resetTouch(); this.observeTouch(event);
+  }
+  private resetTouch(): void {
+    this.touch.cancel(); this.primary=undefined; this.downPointer=undefined;
+    clearTimeout(this.longPressTimer); this.longPressTimer=-1; this.dragged=false;
+  }
+  private touchSnapshot(phase: FxTouchPhase, reason?: FxTouchCancelReason): FxTouchSnapshot | undefined {
+    const start=this.downPointer; const pointer=this.primary;
+    if(start===undefined || pointer===undefined)return undefined;
+    return {phase:phase,pointerId:start.id,startPointer:{x:start.x,y:start.y},pointer:{x:pointer.x,y:pointer.y},
+      delta:{x:pointer.x-start.x,y:pointer.y-start.y},startPosition:{x:this.downPosition.x,y:this.downPosition.y},
+      position:this.getPosition(),dragged:this.dragged,cancelReason:reason};
+  }
+  private observeTouch(event?: FxTouchSnapshot): void {
+    const callback=this.interactions.onTouch;
+    if(event!==undefined && callback!==undefined)this.runCallback(() => callback(this.copyTouch(event)));
+  }
+  private copyTouch(event: FxTouchSnapshot): FxTouchSnapshot {
+    return {phase:event.phase,pointerId:event.pointerId,startPointer:{x:event.startPointer.x,y:event.startPointer.y},
+      pointer:{x:event.pointer.x,y:event.pointer.y},delta:{x:event.delta.x,y:event.delta.y},
+      startPosition:{x:event.startPosition.x,y:event.startPosition.y},position:{x:event.position.x,y:event.position.y},
+      dragged:event.dragged,cancelReason:event.cancelReason};
+  }
+  private finishTouch(event: FxTouchSnapshot, wasDragged: boolean, result?: FxTouchResult): void {
+    const generation=this.interactionGeneration;
+    this.observeTouch(event);
+    if(generation!==this.interactionGeneration || this.destroyed)return;
+    let consumed=false;
+    const callback=this.interactions.onRelease;
+    if(callback!==undefined) {
+      try {consumed=callback(this.copyTouch(event))===FxReleaseDecision.CONSUMED;}
+      catch(_) {if(this.controller!==undefined)this.controller.reportCallbackFailure();}
+    }
+    if(consumed) {
+      if(generation===this.interactionGeneration) {
+        this.cancelAnimations();
+        if(this.boundary!==undefined && this.boundary.cancelPending!==undefined)this.boundary.cancelPending();
+      }
+      return;
+    }
+    if(generation!==this.interactionGeneration || this.destroyed)return;
+    // Release callbacks precede click, as in Android's touchCancel -> onUp -> performClickAction.
+    if(result!==undefined)this.deliver(result);
+    if(generation===this.interactionGeneration && wasDragged)this.settleDrag();
+  }
+  private dragPosition(point: FxPoint): FxPoint {
+    return this.snapshot.config.boundaryMode===FxBoundaryMode.ANDROID_2 ? clamp(point,bounds(this.getGeometry(),true)):point;
+  }
   private deliver(result: FxTouchResult): void {
     try {
       if(result.kind==='drag') {
-        this.dragged=true; clearTimeout(this.longPressTimer); this.position=result.position; this.refresh();
+        this.dragged=true; clearTimeout(this.longPressTimer); this.position=this.dragPosition(result.position); this.refresh();
         if(this.boundary!==undefined)this.boundary.moveFrame(this.position);
         if(this.interactions.onDrag!==undefined) {
           const callback=this.interactions.onDrag; this.runCallback(() => callback(this.getPosition()));
@@ -208,7 +298,9 @@ export class FxScopePlatform implements FxPlatform {
   private settleDrag(): void {
     const target=settle(this.position,this.getGeometry());
     const generation=this.controller===undefined ? -1:this.controller.getGeneration();
-    const completed=this.move(target,this.snapshot.config.animation.enabled && this.snapshot.config.rebound);
+    const noSettle=this.snapshot.config.boundaryMode===FxBoundaryMode.ANDROID_2 && !this.snapshot.config.adsorb;
+    const completed=noSettle ? (this.boundary!==undefined && this.boundary.flush!==undefined ? this.boundary.flush():Promise.resolve()) :
+      this.move(target,this.snapshot.config.animation.enabled && this.snapshot.config.rebound);
     const interaction=this.interactionGeneration;
     this.observe(completed.then(async () => {
       if(this.controller!==undefined && this.controller.getGeneration()===generation && this.context!==undefined && this.interactionGeneration===interaction) await this.controller.savePosition();
@@ -235,6 +327,7 @@ export class FxScopePlatform implements FxPlatform {
     if(this.mount!==undefined || this.context===undefined || this.source===undefined) return;
     this.mount=this.source.create(this.context);const mount=this.mount;
     if(mount.observeSize!==undefined)mount.observeSize((size: FxSize) => {if(this.mount===mount)this.layoutContent(size);});
+    if(mount.observeLayout!==undefined)mount.observeLayout((size: FxSize) => {if(this.mount===mount)this.layoutContent(size,true);});
     this.snapshot.content=this.mount.content; this.attached=true;
     this.refresh(); this.lifecycle(FxEventType.ATTACH);
   }

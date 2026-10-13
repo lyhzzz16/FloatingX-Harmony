@@ -1,7 +1,8 @@
 import { FxError } from './FxError';
-import { FxPoint, FxInsets, FxGravity, FxEdgeAdsorb, FxDisplayMode, FxAnimationConfig, FxAnimationCurve } from './FxTypes';
+import { FxPoint, FxInsets, FxGravity, FxEdgeAdsorb, FxDisplayMode, FxAnimationConfig, FxAnimationCurve, FxBoundaryMode } from './FxTypes';
 
 export interface FxConfigOptions {
+  boundaryMode?: FxBoundaryMode;
   position?: FxPoint;
   gravity?: FxGravity;
   offset?: FxPoint;
@@ -29,6 +30,7 @@ function requireBoolean(value: boolean, field: string): void {
 
 /** Owns nested option copies. copy() revalidates modifications before handing them to a controller. */
 export class FxConfig {
+  boundaryMode: FxBoundaryMode;
   position?: FxPoint;
   gravity: FxGravity;
   offset: FxPoint;
@@ -43,6 +45,7 @@ export class FxConfig {
   clickIntervalMs: number;
 
   constructor(options: FxConfigOptions = {}) {
+    this.boundaryMode = options.boundaryMode === undefined ? FxBoundaryMode.CONTENT : options.boundaryMode;
     if (options.position !== undefined) this.position = { x: options.position.x, y: options.position.y };
     this.gravity = options.gravity === undefined ? FxGravity.TOP_LEFT : options.gravity;
     this.offset = options.offset === undefined ? { x: 0, y: 0 } : { x: options.offset.x, y: options.offset.y };
@@ -61,6 +64,7 @@ export class FxConfig {
   }
 
   validate(): void {
+    if (this.boundaryMode !== FxBoundaryMode.CONTENT && this.boundaryMode !== FxBoundaryMode.ANDROID_2) throw new FxError('INVALID_CONFIG', 'Unknown boundaryMode');
     if (this.position !== undefined) {
       requireFinite(this.position.x, 'position.x'); requireFinite(this.position.y, 'position.y');
     }
@@ -89,7 +93,7 @@ export class FxConfig {
 
   copy(): FxConfig {
     const options: FxConfigOptions = {
-      position: this.position, gravity: this.gravity, offset: this.offset, margin: this.margin,
+      boundaryMode: this.boundaryMode, position: this.position, gravity: this.gravity, offset: this.offset, margin: this.margin,
       displayMode: this.displayMode, adsorb: this.adsorb, edgeAdsorb: this.edgeAdsorb, rebound: this.rebound,
       halfHide: this.halfHide, halfHideRatio: this.halfHideRatio, animation: this.animation,
       clickIntervalMs: this.clickIntervalMs

@@ -28,7 +28,7 @@ test('API12 hidden system surface is invisible, non-touchable and non-focusable;
 test('hide native property failure rejects and restores visible interaction state',async()=>{const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();await p.applyConfig(new FxConfig());await p.show();b.window.failures.set('focusable',Error('focus failure'));await assert.rejects(p.hide(),/focus failure/);assert.equal(b.window.properties.touchable,true);assert.equal(b.window.properties.focusable,true);assert.equal(b.view.getSnapshot().visible,true);await p.destroy();});
 test('system drag consumes display vp despite moving local coordinates and saves only final native readback',async()=>{const {FxController}=require('../work/core/core/FxController.js');const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());const saved=[];const controller=new FxController(p,new FxConfig({adsorb:false,position:{x:10,y:10}}),undefined,{error(){}});p.bindController(controller);controller.bindPositionStorage({namespace:'tests',key:'system',storage:{async load(){},async save(key,record){saved.push({key,record});},async clear(){}}},()=>p.getGeometry());await controller.show();const event=(type,displayX,windowX)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX,displayY:100,windowX,windowY:0}]});b.view.handleTouch(event(TouchType.Down,100,0));b.view.handleTouch(event(TouchType.Move,120,0));for(let i=0;i<15;i++)await Promise.resolve();assert.equal(p.getPosition().x,30);assert.equal(saved.length,0);b.view.handleTouch(event(TouchType.Up,140,-20));for(let i=0;i<25;i++)await Promise.resolve();assert.equal(p.getPosition().x,50);assert.equal(saved.length,1);assert.equal(saved[0].record.position.x,50);assert.match(saved[0].key,/system/);await controller.cancel();});
 test('new system pointer cancels native animation and cannot resume older frame',async()=>{const b=nativeBoundary();const clock=new TestClock();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry(),undefined,undefined,clock);await p.create();await p.applyConfig(new FxConfig({adsorb:false,animation:{enabled:true,durationMs:100,curve:'linear'}}));const moving=p.move({x:100,y:100},true);for(let i=0;i<8;i++)await Promise.resolve();b.view.handleTouch({type:TouchType.Down,timestamp:1000000,changedTouches:[{id:1,displayX:100,displayY:100,windowX:0,windowY:0}]});clock.advance(100);await moving;assert.deepEqual(p.getPosition(),{x:0,y:0});await p.destroy();});
-test('secondary system pointer cannot reset the shared primary gesture',async()=>{const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();await p.applyConfig(new FxConfig({adsorb:false,position:{x:10,y:10}}));const event=(type,id,x)=>({type,timestamp:1000000,changedTouches:[{id,displayX:x,displayY:100,windowX:0,windowY:0}]});b.view.handleTouch(event(TouchType.Down,1,100));b.view.handleTouch(event(TouchType.Down,2,1000));b.view.handleTouch(event(TouchType.Move,1,120));for(let i=0;i<20;i++)await Promise.resolve();assert.equal(p.getPosition().x,30);await p.destroy();});
+test('secondary system pointer cannot reset the shared primary gesture',async()=>{const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();await p.applyConfig(new FxConfig({adsorb:false,position:{x:10,y:10}}));await p.show();const event=(type,id,x)=>({type,timestamp:1000000,changedTouches:[{id,displayX:x,displayY:100,windowX:0,windowY:0}]});b.view.handleTouch(event(TouchType.Down,1,100));b.view.handleTouch(event(TouchType.Down,2,1000));b.view.handleTouch(event(TouchType.Move,1,120));for(let i=0;i<20;i++)await Promise.resolve();assert.equal(p.getPosition().x,30);await p.destroy();});
 test('native access checks classify only actual permission or capability errors as fallback-eligible',async()=>{for(const [code,expected]of [[201,'PERMISSION_DENIED'],[801,'CAPABILITY_UNSUPPORTED'],[16000050,'WINDOW_OPERATION_FAILED']]){const b=nativeBoundary();b.accessError=Object.assign(Error('access API failed'),{code});const f=new b.api.FxNativeWindowFactory({},new ScopeContent());await assert.rejects(f.checkAccess(),{code:expected,platformCode:code});}});
 
 test('configuration waits for and supersedes an in-flight native projection without rollback corruption',async()=>{
@@ -43,7 +43,7 @@ test('configuration waits for and supersedes an in-flight native projection with
  assert.equal(p.getProjection().visibleSize.width,25);assert.equal(f.native.getRect().width,25);assert.deepEqual(p.getPosition(),{x:0,y:20});await p.destroy();
 });
 test('display density and viewport change refresh shared drag release bounds',async()=>{
- const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();await p.applyConfig(new FxConfig({adsorb:false,position:{x:10,y:10}}));
+ const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();await p.applyConfig(new FxConfig({adsorb:false,position:{x:10,y:10}}));await p.show();
  b.display.width=1500;b.display.densityPixels=3;b.displayListener(42);for(let i=0;i<20;i++)await Promise.resolve();assert.equal(p.getGeometry().viewport.size.width,500);
  const event=(type,x)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:x,displayY:100,windowX:0,windowY:0}]});
  b.view.handleTouch(event(TouchType.Down,100));b.view.handleTouch(event(TouchType.Move,490));for(let i=0;i<20;i++)await Promise.resolve();assert.equal(p.getPosition().x,408);
@@ -64,7 +64,7 @@ test('failed cleanup after adapter construction failure prohibits fallback even 
 });
 test('changed viewport insets feed shared nearest-edge settlement before native projection',async()=>{
  const b=nativeBoundary();const f=new FakeWindowFactory();const p=new FxSystemPlatform(f,systemGeometry());await p.create();
- const view=new b.api.FxSystemPageView(p,new ScopeContext(),new ScopeContent(),{});await view.create();await p.applyConfig(new FxConfig({position:{x:30,y:20},adsorb:true,edgeAdsorb:FxEdgeAdsorb.LEFT_RIGHT}));
+ const view=new b.api.FxSystemPageView(p,new ScopeContext(),new ScopeContent(),{});await view.create();await p.applyConfig(new FxConfig({position:{x:30,y:20},adsorb:true,edgeAdsorb:FxEdgeAdsorb.LEFT_RIGHT}));await p.show();
  f.native.viewport.size={width:500,height:500};f.native.viewport.insets={left:30,top:5,right:40,bottom:20};await p.move({x:30,y:20},false);
  const event=(type,x)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:x,displayY:100,windowX:0,windowY:0}]});
  view.handleTouch(event(TouchType.Down,100));view.handleTouch(event(TouchType.Move,292));for(let i=0;i<20;i++)await Promise.resolve();assert.equal(p.getPosition().x,268);
@@ -236,4 +236,31 @@ test('live system insets remap old complete range instead of reconstructing hist
  const f=new FakeWindowFactory();let changed;f.native.subscribe=listener=>{changed=listener;return ()=>{};};const p=new FxSystemPlatform(f,systemGeometry());
  await p.create();await p.applyConfig(new FxConfig({edgeAdsorb:'right',halfHide:true}));await p.move({x:250,y:225},false);
  f.native.viewport.insets={left:20,top:30,right:40,bottom:70};changed();await p.tail;assert.deepEqual(p.getPosition(),{x:210,y:205});assert.equal(p.getProjection().visibleSize.width,25);await p.destroy();
+});
+
+test('android system projection separates requested logical position and native correction',async()=>{
+ const f=new FakeWindowFactory();const p=new FxSystemPlatform(f,systemGeometry());await p.create();
+ await p.applyConfig(new FxConfig({boundaryMode:'android-2',adsorb:false,halfHide:true}));f.native.correction={x:5,y:0};
+ await p.move({x:-25,y:40},false);const g=p.getGeometrySnapshot();
+ assert.deepEqual(g.requestedPosition,{x:-25,y:40});assert.deepEqual(g.position,{x:-20,y:40});
+ assert.equal(g.projection.position.x,5);assert.equal(g.projection.visibleSize.width,25);assert.equal(g.coordinateSpace,'display');await p.destroy();
+});
+test('consumed system release cancels queued drag work before a new move',async()=>{
+ const b=nativeBoundary();let control;let release;
+ const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent(),{onRelease:e=>{release=e;control.move(70,90,false);return 'consumed';}}),systemGeometry());
+ const {FxController}=require('../work/core/core/FxController.js');control=new FxController(p,new FxConfig({adsorb:true}));p.bindController(control);await control.show();
+ const event=(type,x)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:x,displayY:100,windowX:0,windowY:0}]});
+ b.view.handleTouch(event(TouchType.Down,0));b.view.handleTouch(event(TouchType.Move,40));b.view.handleTouch(event(TouchType.Up,60));
+ await control.move(70,90,false);assert.equal(release.position.x,60);assert.deepEqual(p.getPosition(),{x:70,y:90});await control.cancel();
+});
+test('explicit App fallback forwards layout snapshots, flush failures and listener cleanup',async()=>{
+ const app=new FakePlatform();app.actualScope='app';let listener;let released=0;
+ app.subscribeLayout=value=>{listener=value;return ()=>{released++;listener=undefined;};};
+ app.getGeometrySnapshot=()=>({instanceId:0,layoutVersion:4,coordinateSpace:'host',content:{width:80,height:40}});
+ const gate=deferred();app.flushGeometry=()=>gate.promise;
+ const p=new FxSystemPlatform(new FakeWindowFactory('denied'),systemGeometry(),()=>app);
+ const seen=[];const off=p.subscribeLayout(value=>seen.push(value));await p.create();listener(app.getGeometrySnapshot());
+ assert.equal(seen[0].coordinateSpace,'host');assert.equal(seen[0].layoutVersion,4);
+ let done=false;const flushed=p.flushGeometry().then(()=>{done=true;});await Promise.resolve();assert.equal(done,false);gate.resolve();await flushed;
+ off();listener(app.getGeometrySnapshot());assert.equal(seen.length,1);await p.destroy();assert.equal(released,1);
 });

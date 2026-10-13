@@ -49,3 +49,38 @@ test('percentage root uses stable containing block through repeated full, clippe
  child.measure=function(){this.size={width:280,height:160};};frame.onMeasure({maxSize:{width:100,height:200}});assert.deepEqual(m.measure(),{width:70,height:40});
  child.measure=function(){this.size={width:120,height:80};};frame.onMeasure({maxSize:{width:100,height:200}});assert.deepEqual(m.measure(),{width:30,height:20});m.dispose();
 });
+
+function measuredLayout(frame,width=50,height=50) {
+ frame.setLayoutPosition=()=>{};frame.children=[{measure(){},getMeasuredSize(){return {width,height};},layout(){}}];
+ frame.onMeasure({minSize:{width:0,height:0},maxSize:{width:300,height:500},percentReference:{width:300,height:500}});
+ frame.onLayout({x:0,y:0});
+}
+test('updateAndWait waits for same-size measured layout, not the parameter microtask',async()=>{
+ const s=source();const m=contentSource(s).create({vp2px:v=>v,px2vp:p=>p});const frame=native.frames.at(-1);frame.setNeedsLayout=()=>{};
+ const layouts=[];m.observeLayout(size=>layouts.push(size));let done=false;const waiting=s.updateAndWait({label:'new'},()=>true).then(()=>{done=true;});
+ await Promise.resolve();await Promise.resolve();assert.equal(done,false);measuredLayout(frame);await waiting;
+ assert.deepEqual(layouts,[{width:50,height:50}]);m.dispose();
+});
+test('older measurement cannot complete a newer content update',async()=>{
+ const s=source();const m=contentSource(s).create({vp2px:v=>v,px2vp:p=>p});const frame=native.frames.at(-1);frame.setNeedsLayout=()=>{};measuredLayout(frame);
+ let done=false;const waiting=s.updateAndWait({label:'new'},()=>true).then(()=>{done=true;});await Promise.resolve();
+ frame.onLayout({x:0,y:0});await Promise.resolve();assert.equal(done,false);measuredLayout(frame,100,70);await waiting;assert.equal(done,true);m.dispose();
+});
+test('superseded, canceled and disposed layout waits reject without a timer',async()=>{
+ const s=source();const m=contentSource(s).create({vp2px:v=>v,px2vp:p=>p});const frame=native.frames.at(-1);frame.setNeedsLayout=()=>{};
+ const first=s.updateAndWait({label:'one'},()=>true);const checkFirst=assert.rejects(first,{code:'LAYOUT_SUPERSEDED'});await Promise.resolve();
+ const second=s.updateAndWait({label:'two'},()=>true);const checkSecond=assert.rejects(second,{code:'LAYOUT_CANCELED'});await Promise.resolve();s.cancelLayout('LAYOUT_CANCELED');await Promise.all([checkFirst,checkSecond]);
+ const third=s.updateAndWait({label:'three'},()=>true);const checkThird=assert.rejects(third,{code:'DESTROYED'});await Promise.resolve();m.dispose();await checkThird;
+});
+test('position-only layouts do not repeatedly fire size notifications and trigger feedback',async()=>{
+ const s=source();const m=contentSource(s).create({vp2px:v=>v,px2vp:p=>p});const frame=native.frames.at(-1);const layouts=[];m.observeLayout(size=>layouts.push(size));
+ measuredLayout(frame);await Promise.resolve();frame.onLayout({x:20,y:30});await Promise.resolve();assert.equal(layouts.length,1);m.dispose();
+});
+
+test('a native update failure cancels earlier mount waits and the next update can complete',async()=>{
+ const s=source();const one=contentSource(s).create({vp2px:v=>v,px2vp:p=>p});const f1=native.frames.at(-1);f1.setNeedsLayout=()=>{};
+ const two=contentSource(s).create({vp2px:v=>v,px2vp:p=>p});const f2=native.frames.at(-1);f2.setNeedsLayout=()=>{};
+ const node=native.nodes.at(-1);const update=node.update;node.update=()=>{throw Error('native update failed');};
+ await assert.rejects(s.updateAndWait({label:'fails'},()=>true),/native update failed/);node.update=update;
+ const next=s.updateAndWait({label:'works'},()=>true);await Promise.resolve();measuredLayout(f1);measuredLayout(f2);await next;one.dispose();two.dispose();
+});

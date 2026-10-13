@@ -172,3 +172,67 @@ for(const kind of ['click','longPress','drag'])for(const asyncFailure of [false,
  assert.equal(logs.length,1);assert.equal(logs[0].code,'EVENT_CALLBACK_FAILED');assert.equal(JSON.stringify(logs).includes(secret),false);
  assert.deepEqual(events.filter(e=>e.error),[]);assert.equal(c.getState(),'destroyed');assert.equal(p.getSnapshot().content,undefined);
 });
+
+test('primary lifecycle observes stationary up and system cancel, ignores secondary up and hidden input',async()=>{
+ const seen=[];const s=await setup({}, {onTouch:e=>seen.push(e)});
+ s.platform.handleTouch(touch(0,7,100,100,0));s.platform.handleTouch(touch(0,9,200,200,10));
+ s.platform.handleTouch(touch(1,9,200,200,20));s.platform.handleTouch(touch(1,7,100,100,30));
+ assert.deepEqual(seen.map(e=>[e.phase,e.pointerId]),[['down',7],['up',7]]);
+ assert.equal(seen[1].dragged,false);assert.deepEqual(seen[1].delta,{x:0,y:0});
+ s.platform.handleTouch(touch(0,7,100,100,40));s.platform.handleTouch(touch(3,7,100,100,50));
+ assert.equal(seen.at(-1).cancelReason,'system');
+ await s.controller.hide();s.platform.handleTouch(touch(0,7,0,0,60));assert.equal(seen.length,4);await s.controller.cancel();
+});
+test('hide cancels active pointer synchronously once and never runs a release decision',async()=>{
+ const events=[];let releases=0;const s=await setup({}, {onTouch:e=>events.push(e),onRelease:()=>{releases++;return 'default';}});
+ s.platform.handleTouch(touch(0,1,100,100,0));const hiding=s.controller.hide();
+ assert.equal(events.at(-1).cancelReason,'hidden');await hiding;await s.controller.cancel();
+ assert.deepEqual(events.map(e=>e.phase),['down','cancel']);assert.equal(releases,0);
+});
+test('consumed release retains pre-settle location and allows reentrant move',async()=>{
+ const s=await setup({adsorb:true},{onRelease:e=>{assert.equal(e.position.x,80);s.controller.move(40,60,false);return 'consumed';}});
+ s.platform.handleTouch(touch(0,1,0,0,0));s.platform.handleTouch(touch(2,1,80,90,10));s.platform.handleTouch(touch(1,1,80,90,20));
+ for(let i=0;i<12;i++)await Promise.resolve();assert.deepEqual(s.platform.getPosition(),{x:40,y:60});await s.controller.cancel();
+});
+test('release decision precedes click and consumed surface does not click',async()=>{
+ const order=[];let consume=false;
+ const s=await setup({}, {onTouch:e=>order.push(e.phase),onRelease:()=>{order.push('release');return consume?'consumed':'default';},onClick:()=>order.push('click')});
+ s.platform.handleTouch(touch(0,1,0,0,0));s.platform.handleTouch(touch(1,1,0,0,10));assert.deepEqual(order,['down','up','release','click']);
+ consume=true;order.length=0;s.platform.handleTouch(touch(0,1,0,0,400));s.platform.handleTouch(touch(1,1,0,0,410));assert.deepEqual(order,['down','up','release']);await s.controller.cancel();
+});
+test('down callback can cancel without late long press or unmatched up',async()=>{
+ const events=[];const s=await setup({}, {onTouch:e=>{events.push(e.phase);if(e.phase==='down')s.controller.cancel();}});
+ s.platform.handleTouch(touch(0,1,0,0,0));await s.controller.cancel();s.platform.handleTouch(touch(1,1,0,0,600));
+ assert.deepEqual(events,['down','cancel']);
+});
+test('android bounds display real clipped drag and disabled adsorption does not force a release clamp',async()=>{
+ const releases=[];const s=await setup({boundaryMode:'android-2',halfHide:true,halfHideRatio:.5,margin:{left:10,right:10,top:20,bottom:20},position:{x:0,y:20}}, {onRelease:e=>{releases.push(e);return 'default';}});
+ s.platform.handleTouch(touch(0,1,100,100,0));s.platform.handleTouch(touch(2,1,0,70,10));
+ assert.deepEqual(s.platform.getPosition(),{x:-25,y:0});
+ assert.deepEqual(s.platform.getSnapshot().projection,{position:{x:0,y:0},visibleSize:{width:25,height:50},contentOffset:{x:-25,y:0}});
+ s.platform.handleTouch(touch(1,1,0,70,20));await Promise.resolve();assert.equal(releases[0].position.x,-25);assert.equal(s.platform.getPosition().y,0);await s.controller.cancel();
+});
+test('geometry snapshots are detached and declared size is not measured layout',async()=>{
+ const s=await setup();const g=s.controller.getGeometrySnapshot();assert.equal(g.measured,false);g.viewport.size.width=1;assert.equal(s.platform.getGeometry().viewport.size.width,300);
+ const layouts=[];const unsubscribe=s.controller.subscribeLayout(g=>layouts.push(g));s.platform.layoutContent({width:80,height:60},true);
+ assert.equal(layouts.at(-1).measured,true);assert.deepEqual(layouts.at(-1).content,{width:80,height:60});assert.ok(layouts.at(-1).instanceId>0);
+ unsubscribe();const count=layouts.length;s.platform.layoutContent({width:90,height:60},true);assert.equal(layouts.length,count);await s.controller.cancel();assert.equal(s.controller.getGeometrySnapshot(),undefined);
+});
+
+test('consuming release bypasses default position persistence and settles neither up nor cancel',async()=>{
+ for(const end of [1,3]) {
+  const saves=[];const p=new FxScopePlatform({onRelease:()=> 'consumed'});const c=new FxController(p,new FxConfig({adsorb:true}));p.bindController(c);
+  c.bindPositionStorage({namespace:'parity',key:String(end),storage:{async load(){},async save(k,v){saves.push(v);},async clear(){}}},()=>p.getGeometry());
+  p.mountHost(new ScopeContext(),new ScopeContent());p.layoutHost({width:300,height:500});await c.show();
+  p.handleTouch(touch(0,1,0,0,0));p.handleTouch(touch(2,1,80,60,10));p.handleTouch(touch(end,1,80,60,20));
+  for(let i=0;i<15;i++)await Promise.resolve();assert.equal(saves.length,0);assert.equal(p.getPosition().x,80);await c.cancel();
+ }
+});
+test('cancel callback reentering cancel joins the same resource release',async()=>{
+ let nested;const s=await setup({}, {onTouch:e=>{if(e.phase==='cancel')nested=s.controller.cancel();}});
+ s.platform.handleTouch(touch(0,1,0,0,0));const cancel=s.controller.cancel();assert.equal(cancel,nested);await cancel;assert.equal(s.content.disposals,1);
+});
+test('observer cannot mutate the release decision snapshot',async()=>{
+ const s=await setup({}, {onTouch:e=>{e.position.x=999;},onRelease:e=>{assert.equal(e.position.x,20);return 'default';}});
+ s.platform.handleTouch(touch(0,1,0,0,0));s.platform.handleTouch(touch(2,1,20,20,10));s.platform.handleTouch(touch(1,1,20,20,20));await s.controller.cancel();
+});

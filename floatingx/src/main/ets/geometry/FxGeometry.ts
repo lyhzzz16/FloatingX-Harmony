@@ -1,7 +1,7 @@
 import { FxConfig } from '../core/FxConfig';
 import { FxError } from '../core/FxError';
 import { FxPoint, FxSize, FxBounds, FxViewport, FxProjection, FxGravity, FxEdgeAdsorb,
-  FxEdge, FxPositionRecord } from '../core/FxTypes';
+  FxEdge, FxPositionRecord, FxBoundaryMode, FxGeometrySnapshot } from '../core/FxTypes';
 
 export interface FxGeometryInput {
   viewport: FxViewport;
@@ -35,13 +35,26 @@ function validateBounds(limits: FxBounds): void {
 }
 
 /** Oversized content deterministically anchors at the leading inset + margin. */
-export function bounds(input: FxGeometryInput): FxBounds {
+export function bounds(input: FxGeometryInput, dragging: boolean = false): FxBounds {
   input.config.validate();
   validateSize(input.viewport.size); validateSize(input.content);
   const insets = input.viewport.insets;
   nonnegative(insets.left, 'insets.left'); nonnegative(insets.top, 'insets.top');
   nonnegative(insets.right, 'insets.right'); nonnegative(insets.bottom, 'insets.bottom');
   const margin = input.config.margin;
+  if (input.config.boundaryMode === FxBoundaryMode.ANDROID_2) {
+    const loose = dragging && input.config.rebound;
+    const half = input.config.halfHide ? input.content.width * input.config.halfHideRatio : 0;
+    const minX = input.config.halfHide ? -half : (loose ? 0 : margin.left);
+    const minY = insets.top + (loose ? 0 : margin.top);
+    return {
+      minX: minX,
+      maxX: Math.max(minX, input.config.halfHide ? input.viewport.size.width - half :
+        input.viewport.size.width - input.content.width - (loose ? 0 : margin.right)),
+      minY: minY,
+      maxY: Math.max(minY, input.viewport.size.height - insets.bottom - input.content.height - (loose ? 0 : margin.bottom))
+    };
+  }
   const minX = insets.left + margin.left;
   const minY = insets.top + margin.top;
   const result: FxBounds = {
@@ -88,9 +101,12 @@ export function initial(input: FxGeometryInput): FxPoint {
   return clamp(shifted, limits);
 }
 
-/** Released coordinates always become legal; rebound controls the adapter's animation, not legality. */
+/** Resolves release positioning; Android mode preserves the drag position when adsorption is disabled. */
 export function settle(point: FxPoint, input: FxGeometryInput): FxPoint {
   const limits = bounds(input);
+  if (input.config.boundaryMode === FxBoundaryMode.ANDROID_2 && !input.config.adsorb) {
+    validatePoint(point); return {x:point.x,y:point.y};
+  }
   const result = clamp(point, limits);
   if (!input.config.adsorb) return result;
   switch (input.config.edgeAdsorb) {
@@ -132,6 +148,14 @@ export function logicalEdge(point: FxPoint, input: FxGeometryInput): FxEdge {
 /** Native position and hit region describe only the visible slice; logical point stays full-sized. */
 export function project(point: FxPoint, input: FxGeometryInput): FxProjection {
   const limits = bounds(input);
+  if (input.config.boundaryMode === FxBoundaryMode.ANDROID_2) {
+    validatePoint(point);
+    const x = Math.max(0, Math.min(input.viewport.size.width, point.x));
+    const y = Math.max(0, Math.min(input.viewport.size.height, point.y));
+    return {position:{x:x,y:y},contentOffset:{x:point.x-x,y:point.y-y},visibleSize:{
+      width:Math.max(0,Math.min(input.viewport.size.width,point.x+input.content.width)-x),
+      height:Math.max(0,Math.min(input.viewport.size.height,point.y+input.content.height)-y)}};
+  }
   const position = clamp(point, limits);
   const visibleSize: FxSize = { width: input.content.width, height: input.content.height };
   const contentOffset: FxPoint = { x: 0, y: 0 };
@@ -195,4 +219,17 @@ export function restore(record: FxPositionRecord, input: FxGeometryInput): FxPoi
   const oldInput: FxGeometryInput = { viewport: oldViewport, content: input.content, config: input.config };
   const oldLimits = bounds(oldInput);
   return remap(record.position, oldLimits, record.edge, limits);
+}
+
+/** Copies adapter-owned geometry so consumers cannot mutate window state. */
+export function snapshot(input: FxGeometryInput, position: FxPoint, projection: FxProjection,
+  requested: FxPoint, layoutVersion: number, measured: boolean, density: number, space: string): FxGeometrySnapshot {
+  return {instanceId:0,layoutVersion:layoutVersion,measured:measured,coordinateSpace:space,density:density,
+    viewport:{size:{width:input.viewport.size.width,height:input.viewport.size.height},insets:{
+      left:input.viewport.insets.left,top:input.viewport.insets.top,right:input.viewport.insets.right,bottom:input.viewport.insets.bottom}},
+    content:{width:input.content.width,height:input.content.height},
+    requestedPosition:{x:requested.x,y:requested.y},position:{x:position.x,y:position.y},
+    projection:{position:{x:projection.position.x,y:projection.position.y},
+      visibleSize:{width:projection.visibleSize.width,height:projection.visibleSize.height},
+      contentOffset:{x:projection.contentOffset.x,y:projection.contentOffset.y}}};
 }

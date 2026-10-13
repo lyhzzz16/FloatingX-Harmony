@@ -15,6 +15,7 @@ class NativeControl {
  cancel(){if(this.cancellation)return this.cancellation;this.state='destroying';this.cancellation=(async()=>{if(this.gate)await this.gate.promise;this.state='destroyed';if(registry.get(this.tag)===this)registry.delete(this.tag);})();return this.cancellation;}
 }
 const fx={
+ ...require('../work/core/core/FxTypes.js'),
  FxError,FxUninstallError:class extends FxError{},FxConfig:class{constructor(options){Object.assign(this,options);}},FxContent:class{},FxMemoryStorage:class{},FxPreferencesStorage:class{},
  FxGravity:{TOP_LEFT:'tl',TOP_CENTER:'tc',TOP_RIGHT:'tr',CENTER_LEFT:'cl',CENTER:'c',CENTER_RIGHT:'cr',BOTTOM_LEFT:'bl',BOTTOM_CENTER:'bc',BOTTOM_RIGHT:'br'},
  FxEdgeAdsorb:{LEFT:'l',RIGHT:'r',TOP:'t',BOTTOM:'b',LEFT_RIGHT:'lr',TOP_BOTTOM:'tb'},FxAnimationCurve:{EASE:'ease'},FxDisplayMode:{Normal:'normal'},

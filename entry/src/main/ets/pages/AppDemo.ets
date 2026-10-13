@@ -1,16 +1,17 @@
-import { FloatingX, FxWindowHost, FxContent, FxControl, FxConfig, FxMemoryStorage } from 'floatingx';
+import { FloatingX, FxWindowHost, FxContent, FxControl, FxConfig, FxBoundaryMode, FxReleaseDecision, FxMemoryStorage } from 'floatingx';
 import { DemoPageOwner } from '../entryability/DemoOwner';
 class AppContentParams {
+  width: number;
   close: () => void;
   button: () => void;
-  constructor(close: () => void, button: () => void) { this.close=close; this.button=button; }
+  constructor(close: () => void, button: () => void,width: number = 240) { this.width=width;this.close=close; this.button=button; }
 }
 @Builder
 function appContent(params: AppContentParams) {
   Column({space:4}) {
     Text('应用浮窗：拖动标题').height(40)
     Row({space:4}) { Button('内按钮').onClick(params.button); Button('关闭').onClick(params.close) }
-  }.width(240).height(100).backgroundColor('#E4F2FF').borderRadius(12)
+  }.width(params.width).height(100).backgroundColor('#E4F2FF').borderRadius(12)
 }
 @Component
 export struct AppDemo {
@@ -18,6 +19,8 @@ export struct AppDemo {
   @State private message: string = '等待主窗口加载';
   private host?: FxWindowHost;
   private pageOwner: DemoPageOwner = new DemoPageOwner();
+  @State private consumed: boolean = false;
+  private wide: boolean = false;
   private controller?: FxControl<AppContentParams>;
   private paths: NavPathStack = new NavPathStack();
   aboutToAppear(): void {this.pageOwner.activate();this.hostReady();}
@@ -30,13 +33,21 @@ export struct AppDemo {
       () => { if(this.controller!==undefined) this.run(this.controller.cancel()); },() => { this.message='内按钮已点击'; }),{width:240,height:100});
     // README app snippet. WindowHost is created after WindowStage.loadContent.
     const controller=FloatingX.installApp({tag:'app-demo',host:host,content:content,
-      config:new FxConfig({position:{x:20,y:120},adsorb:false}),
+      config:new FxConfig({boundaryMode:FxBoundaryMode.ANDROID_2,halfHide:true,position:{x:20,y:120},adsorb:false}),
       pagePolicy:{mode:'blacklist',names:['Blocked']},
       storage:{namespace:'demo',storage:new FxMemoryStorage()},
-      interactions:{dragArea:{x:0,y:0,width:240,height:40}}});
+      interactions:{dragArea:{x:0,y:0,width:240,height:40},
+        onTouch:(event) => {if(this.pageOwner.isActive())this.message=event.phase+' delta='+event.delta.x.toFixed(1)+','+event.delta.y.toFixed(1);},
+        onRelease:() => this.consumed?FxReleaseDecision.CONSUMED:FxReleaseDecision.DEFAULT}});
     if(!this.pageOwner.hold(controller))return;
     this.controller=controller;
     this.message='API 12 应用内浮窗'; this.run(controller.show());
+  }
+  private async resize(): Promise<void> {
+    const control=this.controller;if(control===undefined)return;
+    this.wide=!this.wide;
+    const value=await control.updateContentAndWaitForLayout(new AppContentParams(() => {this.run(control.cancel());},() => {this.message='内按钮已点击';},this.wide?280:240));
+    if(this.pageOwner.isActive())this.message='layout='+value.layoutVersion+' width='+value.content.width+' requestX='+value.requestedPosition.x+' actualX='+value.position.x;
   }
   aboutToDisappear(): void {this.run(this.pageOwner.close());}
   private run(promise: Promise<void>): void { promise.catch((error: Error) => {if(this.pageOwner.isActive())this.message=error.message;}); }
@@ -53,6 +64,8 @@ export struct AppDemo {
     Navigation(this.paths) {
       Column({space:12}) {
         Text(this.message)
+        Button(this.consumed?'接管释放：开':'接管释放：关').onClick(() => {this.consumed=!this.consumed;})
+        Button('更新宽度并等待布局').onClick(() => this.run(this.resize()))
         Row({space:8}) {
           Button('显示').onClick(() => { if(this.controller!==undefined) this.run(this.controller.show()); })
           Button('隐藏').onClick(() => { if(this.controller!==undefined) this.run(this.controller.hide()); })
