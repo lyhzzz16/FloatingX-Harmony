@@ -117,6 +117,7 @@ class FxWindowAdapter implements FxNativeWindow {
   private touchable: boolean = true;private focusable: boolean = false;private hidden: boolean = false;
   private viewportHost?: FxWindowHost;
   private safeAreaPolicy: FxSafeAreaPolicy = FxSafeAreaPolicy.HOST;
+  private viewportChangeKey?: string;
   private focusPolicy: FxFocusPolicy = FxFocusPolicy.DEFAULT;
   private prepared: boolean = false;
   private disposed: boolean = false;
@@ -240,7 +241,10 @@ class FxWindowAdapter implements FxNativeWindow {
   }
   private readProperties(): FxNativeRect {const rect=this.native.getWindowProperties().windowRect;return {x:rect.left,y:rect.top,width:rect.width,height:rect.height};}
   getRect(): FxNativeRect {return this.confirmed===undefined ? this.readProperties():{x:this.confirmed.x,y:this.confirmed.y,width:this.confirmed.width,height:this.confirmed.height};}
-  setSafeAreaPolicy(policy: FxSafeAreaPolicy): void {this.safeAreaPolicy=policy;}
+  setSafeAreaPolicy(policy: FxSafeAreaPolicy): void {
+    this.safeAreaPolicy=policy;
+    if(this.viewportChangeKey!==undefined)this.viewportChangeKey=this.readViewportChangeKey();
+  }
   getViewport(): FxNativeViewport {
     const id=this.native.getWindowProperties().displayId;
     if(id===undefined)throw new FxError('CAPABILITY_UNSUPPORTED','Target window display id unavailable');
@@ -269,10 +273,26 @@ class FxWindowAdapter implements FxNativeWindow {
     this.native.on('windowEvent',callback);
     return () => {try{this.native.off('windowEvent',callback);}catch(error){if(!this.externallyDestroyed)throw error as Error;}};
   }
+  private readViewportChangeKey(): string {
+    const viewport=this.getViewport();const id=this.native.getWindowProperties().displayId;
+    if(id===undefined)throw new FxError('CAPABILITY_UNSUPPORTED','Target window display id unavailable');
+    const rotation=display.getDisplayByIdSync(id).rotation;
+    return JSON.stringify([id,rotation,viewport.density,viewport.size.width,viewport.size.height,
+      viewport.insets.left,viewport.insets.top,viewport.insets.right,viewport.insets.bottom]);
+  }
   subscribe(listener: () => void): () => void {
-    const changed=() => {this.confirmed=undefined;listener();};display.on('change',changed);
+    this.viewportChangeKey=this.readViewportChangeKey();
+    const changed=() => {
+      let key: string;
+      try {key=this.readViewportChangeKey();}
+      catch(_) {this.confirmed=undefined;listener();return;}
+      // Display notifications also cover changes that do not alter pointer coordinates.
+      if(key===this.viewportChangeKey)return;
+      this.viewportChangeKey=key;this.confirmed=undefined;listener();
+    };
+    display.on('change',changed);
     const releaseHost=this.viewportHost?.subscribe(changed);
-    return () => {try{display.off('change',changed);}finally{if(releaseHost!==undefined)releaseHost();}};
+    return () => {try{display.off('change',changed);}finally{this.viewportChangeKey=undefined;if(releaseHost!==undefined)releaseHost();}};
   }
 }
 let instanceSequence: number = 0;
