@@ -4,8 +4,8 @@
 
 - Android：FloatingX **2.3.7**，tag `2.3.7`，commit `a4b9dbfc1649accde832d2f70dd90d54bf5fac9a`。
 - Harmony：上游与本 fork 的 `731e834245492c8b43256de861208ed2abfe1c0c`。
-- 本预览版：`0.1.1-yb.1`。不宣称所有 Android API、默认值、窗口类型和设备表现均已完全相同。
-- 组件只增加触摸观察/释放接管、已有 Android 拖动边界的可选映射，以及测量与布局结果。不包含业务状态、阈值、倒计时、导航、录音或窗口切换策略。
+- 本预览版：`0.1.1-yb.2`。不宣称所有 Android API、默认值、窗口类型和设备表现均已完全相同。
+- 本轮扩展通用触摸仲裁、初始化/尺寸变化、安全区、窗口生命周期、焦点与隐藏测量；逐项证据与 C01～C25 结论见 [本轮对齐记录](parity-round2.md)。不包含业务状态、倒计时、导航、录音或窗口切换策略。
 
 ## 逐项证据与取舍
 
@@ -35,7 +35,7 @@ onRelease?: (event: FxTouchSnapshot) => FxReleaseDecision;
 - CONSUMED 跳过本轮默认吸附、回弹、保存和浮窗点击，取消旧待执行移动。调用方可异步更新内容、等待布局后主动移动；调用方须处理 Promise 失败。
 - 决策必须同步返回枚举，不能返回 Promise。异常会上报回调失败并使用默认路径；观察回调的异步任务不阻塞手势。
 - 回调可调用控制句柄；重入移动/隐藏/取消会使旧释放后续失效。库不等待回调中启动的应用任务。
-- `delta` 是原始触点累计位移；`position` 是拖动边界处理后的逻辑浮窗坐标、尚未执行释放后的吸边。两者不是同一个坐标。新 API 不保证原生子控件的每个事件都由父浮窗接收；已有拖拽区和子控件派发规则保留。
+- `delta` 是原始触点累计位移；`position` 是拖动边界处理后的逻辑浮窗坐标、尚未执行释放后的吸边。两者不是同一个坐标。LEGACY 保留旧 dragArea；ANDROID_2 使用原生子内容仲裁，子点击优先，父级取得拖动后才执行父释放。自定义内容主动停止 raw 事件传播、已成功子手势及嵌入式渲染框架仍需单独验收。
 
 ## Android 边界模式
 
@@ -56,17 +56,17 @@ new FxConfig({
 
 最终边界在非半隐藏时叠加四边 margin；半隐藏时仅叠加上下 margin。rebound=false 拖动中也采用最终边界。Android `edgeOffset` 没有新增为独立参数，等价值由调用方合入 margin。此模式的 rebound 对应 Android `enableEdgeRebound`（允许拖动越过 margin），同时保留既有回弹动画开关用途。
 
-注意 Android 源码右边界确实是 **W-w*r**：r≠0.5 时左右可见比例不对称，本 fork 忠实保留公式，不自行修正。水平安全区不额外加入该公式。已有 oversized 内容的 leading-edge 容错保留，不宣称它与 Android 反向边界异常情况等价。
+注意 Android 源码右边界确实是 **W-w*r**：r≠0.5 时左右可见比例不对称，本 fork 忠实保留公式。HOST/EXTEND 不额外加入水平 inset；显式 AVOID_SYSTEM 将公式映射到权威安全矩形，投影也裁剪到该区域。已有 oversized 内容的 leading-edge 容错保留，不宣称它与 Android 反向边界异常情况等价。
 
 App/Scope 使用宿主裁剪、按逻辑位置计算可见投影。System 将可见片段映射为非负窗口及内容偏移，再读取窗口实际矩形；零可见尺寸返回能力错误，不报告伪成功。系统拒绝移动、修正尺寸、权限限制都不等同于 App 能力。
 
-这并非四边自由越界：Android 此配置仍约束 Y，普通模式也限制 X。原需求材料中“任意四边出屏”的概括缺少此版本 Android 证据，本版不实现。也未改变原有九宫格初始化、动画曲线等算法来宣称全库逐像素等价。
+这并非四边自由越界：Android 此配置仍约束 Y，普通模式也限制 X。ANDROID_2 初始化按完整内容九宫格再夹紧；resize 保持绝对坐标，开启吸附时按旧内容中心选择原侧。原 CONTENT 算法及动画曲线保留。
 
 ## 几何与布局完成
 
 - `control.getGeometrySnapshot()`：副本，包含 instanceId、layoutVersion、measured、coordinateSpace、density、viewport/insets、content、requestedPosition、position、projection。
 - `control.subscribeLayout(listener)`：返回取消订阅函数；通知宿主变化与内容已测量布局，首次可能先出现 measured=false 的声明尺寸；销毁释放订阅。它不是每一帧移动监听。
-- `control.updateContentAndWaitForLayout(params)`：要求已显示并挂载；保留同一个内容节点，等待本次参数更新之后的 measure+layout，并等待 System 投影完成，返回实测快照。包括同尺寸更新，不使用固定毫秒延时。
+- `control.updateContentAndWaitForLayout(params)`：要求已挂载且宿主有效，可处于 layoutOnly 的 PREPARED 状态；保留同一个内容节点，等待本次参数更新之后的 measure+layout，并等待 System 投影完成，返回实测快照。包括同尺寸更新，不使用固定毫秒延时。
 - 返回时仅保证本次布局及已排队窗口几何已应用，不承诺未来不会发生字号/旋转等新的布局，也不代表屏幕合成帧已经呈现。
 - `measured=false` 时 content 仅是创建时声明尺寸；true 表示有过真实原生测量。pending 更新时同步快照仍是最近已知布局，要求新参数对应尺寸应等待上述 Promise。
 - 更新替换、隐藏、销毁、宿主卸载时等待拒绝；无可见宿主为 NO_HOST，旧更新为 LAYOUT_SUPERSEDED，主动取消为 LAYOUT_CANCELED，销毁为 DESTROYED，无有效测量为 INVALID_GEOMETRY。多个竞争原因并发时不保证错误优先级。

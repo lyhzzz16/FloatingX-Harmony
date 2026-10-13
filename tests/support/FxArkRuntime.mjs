@@ -13,7 +13,9 @@ export function loadScopePlatform() {
  fs.writeFileSync(destination,ts.transpileModule(fs.readFileSync(source,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText);
  globalThis.Curve={Ease:'ease',Linear:'linear',EaseIn:'in',EaseOut:'out',EaseInOut:'inout'};
  globalThis.TouchType={Down:0,Up:1,Move:2,Cancel:3};
- return require(destination).FxScopePlatform;
+ const Module=require('node:module');const original=Module._load;
+ Module._load=function(name,...args){if(name==='@ohos.deviceInfo')return {default:{sdkApiVersion:26}};return original.call(this,name,...args);};
+ try{return require(destination).FxScopePlatform;}finally{Module._load=original;}
 }
 export class ScopeContext {
  vp2px(value){return value;}
@@ -56,7 +58,7 @@ export function loadSystemAdapter(nativeBoundary) {
  fs.writeFileSync(destination,ts.transpileModule(fs.readFileSync(path.join(root,'floatingx/src/main/ets/system/FxWindowAdapter.ets'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText);
  const Module=require('node:module');const original=Module._load;
  Module._load=function(name,...args){
-  if(name==='@ohos.window')return {default:{WindowType:{TYPE_FLOAT:8},RectChangeReason:{UNDEFINED:0,MOVE:3},createWindow:async config=>{nativeBoundary.created.push(config);return nativeBoundary.window;}}};
+  if(name==='@ohos.window')return {default:{WindowEventType:{WINDOW_SHOWN:1,WINDOW_HIDDEN:4,WINDOW_DESTROYED:7},WindowType:{TYPE_FLOAT:8},RectChangeReason:{UNDEFINED:0,MOVE:3},createWindow:async config=>{nativeBoundary.created.push(config);return nativeBoundary.window;}}};
   if(name==='@ohos.display')return {default:{getDisplayByIdSync:id=>{nativeBoundary.displayReads.push(id);return nativeBoundary.display;},on:(_name,listener)=>{nativeBoundary.displayListener=listener;},off:()=>{nativeBoundary.displayListener=undefined;}}};
   if(name==='@ohos.abilityAccessCtrl')return {default:{GrantStatus:{PERMISSION_GRANTED:0},createAtManager:()=>({checkAccessToken:async(...args)=>{nativeBoundary.permissionReads.push(args);if(nativeBoundary.accessError)throw nativeBoundary.accessError;return nativeBoundary.grant;}})}};
   if(name==='@ohos.bundle.bundleManager')return {default:{BundleFlag:{GET_BUNDLE_INFO_WITH_APPLICATION:1},getBundleInfoForSelf:async()=>({appInfo:{accessTokenId:123}})}};

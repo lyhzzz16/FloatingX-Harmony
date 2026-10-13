@@ -69,3 +69,10 @@ test('zero-valued settings and disabled booleans survive normalization', () => {
   assert.equal(c.animation.durationMs, 0);
   assert.equal(new FxConfig({ halfHideRatio: 0.9 }).halfHideRatio, 0.9);
 });
+
+test('Android gesture slop is explicit, validated and survives copies with presentation policies',()=>{
+ assert.throws(()=>new FxConfig({gestureMode:'android-2'}),{code:'INVALID_CONFIG'});
+ for(const slop of [0,-1,Infinity,NaN])assert.throws(()=>new FxConfig({gestureMode:'android-2',touchSlopVp:slop}),{code:'INVALID_CONFIG'});
+ const c=new FxConfig({gestureMode:'android-2',touchSlopVp:12,focusPolicy:'non-focusable',safeAreaPolicy:'avoid-system',layoutOnly:true}).copy();
+ assert.equal(c.touchSlopVp,12);assert.equal(c.gestureMode,'android-2');assert.equal(c.focusPolicy,'non-focusable');assert.equal(c.layoutOnly,true);assert.equal(c.safeAreaPolicy,'avoid-system');
+});

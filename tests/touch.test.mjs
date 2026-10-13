@@ -40,3 +40,13 @@ test('ClickOnly cancels displaced taps without moving; DisplayOnly ignores every
  const d=new FxTouch('DisplayOnly',8,300,500); assert.equal(d.down(p(1,0,0,0)).kind,'none');
  assert.equal(d.up(p(1,0,0,600)).kind,'none'); assert.equal(d.cancel().kind,'none');
 });
+
+test('Android uses axis >= slop, not Euclidean, and releases at Android duration boundaries',()=>{
+ const {FxGestureMode}=require('../work/core/core/FxTypes.js');
+ const t=new FxTouch('normal',8,300,500,FxGestureMode.ANDROID_2);
+ t.down(p(1,0,0,0));assert.equal(t.move(p(1,6,6,20)).kind,'none');assert.equal(t.move(p(1,8,6,30)).kind,'drag');assert.equal(t.up(p(1,8,6,40)).kind,'end');
+ for(const [duration,expected] of [[149,'click'],[150,'end'],[499,'end'],[500,'longPress']]) {
+  const h=new FxTouch('normal',8,0,500,FxGestureMode.ANDROID_2);h.down(p(1,0,0,0));assert.equal(h.move(p(1,0,0,500)).kind,'none');assert.equal(h.up(p(1,0,0,duration)).kind,expected);
+ }
+ t.down(p(1,0,0,1000));assert.equal(t.move(p(1,0,0,1600)).kind,'none');assert.equal(t.move(p(1,9,0,1700)).kind,'drag');assert.equal(t.up(p(1,9,0,1800)).kind,'end');
+});

@@ -2,8 +2,8 @@ import { FxPlatform, FxScope, FxEvent, FxEventType, FxEventCallback } from '../c
 import { FxController } from '../core/FxController';
 import { FxConfig } from '../core/FxConfig';
 import { FxError } from '../core/FxError';
-import { FxPoint, FxSize, FxProjection, FxDisplayMode, FxAnimationCurve, FxGeometrySnapshot, FxLayoutListener, FxTouchCancelReason, FxBoundaryMode } from '../core/FxTypes';
-import { FxGeometryInput, initial, clamp, bounds, project, logicalEdge, remap, snapshot } from '../geometry/FxGeometry';
+import { FxPoint, FxSize, FxProjection, FxDisplayMode, FxAnimationCurve, FxGeometrySnapshot, FxLayoutListener, FxTouchCancelReason, FxBoundaryMode, FxFocusPolicy, FxSafeAreaPolicy } from '../core/FxTypes';
+import { FxGeometryInput, initial, clamp, bounds, project, logicalEdge, remap, snapshot, resizePosition } from '../geometry/FxGeometry';
 import { FxAnimation } from '../component/FxAnimation';
 import { FxNativeWindow, FxWindowFactory, FxSystemView } from './FxNativeWindow';
 export interface FxFrameClock { now(): number; wait(): Promise<void>; cancel(): void; }
@@ -29,6 +29,8 @@ export class FxSystemPlatform implements FxPlatform {
   private tail: Promise<void> = Promise.resolve(); private animation: FxAnimation = new FxAnimation(); private clock: FxFrameClock;
   private layoutVersion: number = 0;
   private measured: boolean = false;
+  private initialMeasurementPending: boolean = true;
+  private releaseVisibility?: () => void;
   private density: number = 1;
   private requestedPosition: FxPoint = {x:0,y:0};
   private layoutListeners: FxLayoutListener[] = [];
@@ -44,6 +46,10 @@ export class FxSystemPlatform implements FxPlatform {
   attachView(view: FxSystemView): void {if(this.destroyed)return;this.view=view;if(this.controller!==undefined)view.bindController(this.controller);this.lifecycle(FxEventType.ATTACH);}
   detachView(): void {this.view=undefined;this.lifecycle(FxEventType.DETACH);}
   subscribeLifecycle(listener: (type: FxEventType) => void): () => void {this.listeners.push(listener);return () => {const i=this.listeners.indexOf(listener);if(i>=0)this.listeners.splice(i,1);};}
+  isActuallyVisible(): boolean {
+    if(this.fallback!==undefined)return this.fallback.isActuallyVisible===undefined || this.fallback.isActuallyVisible();
+    return this.native!==undefined && this.native.terminated!==true && (this.native.isShowing===undefined || this.native.isShowing());
+  }
   isHostVisible(): boolean {return !this.destroyed && (this.fallback===undefined || this.fallback.isHostVisible===undefined || this.fallback.isHostVisible());}
   isReadyToShow(): boolean {return this.fallback!==undefined ? this.fallback.isReadyToShow===undefined || this.fallback.isReadyToShow():this.native!==undefined && (!this.native.requiresView || this.view!==undefined);}
   getPosition(): FxPoint {return this.fallback!==undefined && this.fallback.getPosition!==undefined ? this.fallback.getPosition():{x:this.position.x,y:this.position.y};}
@@ -71,9 +77,15 @@ export class FxSystemPlatform implements FxPlatform {
     if(this.fallback!==undefined){await this.createFallback();return;}
     try {
       await this.factory.checkAccess();this.assertAlive();this.native=await this.factory.create();this.assertAlive();
+      if(this.native.subscribeVisibility!==undefined)this.releaseVisibility=this.native.subscribeVisibility((destroyed: boolean) => {
+        this.cancelTouch(destroyed?FxTouchCancelReason.DESTROYED:FxTouchCancelReason.HIDDEN);this.cancelAnimations();
+        if(destroyed) {if(this.controller!==undefined)this.controller.cancel().catch((error: Error) => this.reportError(error));else this.destroy().catch((error: Error) => this.reportError(error));}
+        else {if(this.controller!==undefined)this.controller.nativeHidden();if(this.view!==undefined){if(this.view.nativeHidden!==undefined)this.view.nativeHidden();else this.observe(this.view.hide());}}
+      });
       this.releaseNative=this.native.subscribe(() => {this.cancelTouch(FxTouchCancelReason.HOST_CHANGED);this.cancelAnimations();this.observe(this.move(this.position,false));});
       await this.native.load(this);await this.native.setBackground('#00000000');
-      await this.native.setTouchable(this.input.config.displayMode!==FxDisplayMode.DisplayOnly);
+      this.applySafeArea(this.input.config.safeAreaPolicy);
+      await this.applyInteraction(this.input.config);
       await this.enqueueNative(async () => {await this.projectNative(initial(this.input));this.positioned=false;});
     } catch(error) {
       const cause=error as Error;await this.cleanupNative();
@@ -104,14 +116,31 @@ export class FxSystemPlatform implements FxPlatform {
     const next=config.copy();this.cancelTouch(FxTouchCancelReason.CONFIG_CHANGED);this.cancelAnimations();
     await this.enqueueNative(async () => {
       this.assertAlive();const previous=this.input.config;this.input.config=next;
-      try {await this.requireNative().setTouchable(next.displayMode!==FxDisplayMode.DisplayOnly);await this.projectNative(this.positioned?clamp(this.position,bounds(this.input)):initial(this.input));if(this.view!==undefined)await this.view.applyConfig(next);}
-      catch(error){this.input.config=previous;try{await this.requireNative().setTouchable(previous.displayMode!==FxDisplayMode.DisplayOnly);}catch(_){}throw error as Error;}
+      try {this.applySafeArea(next.safeAreaPolicy);await this.applyInteraction(next);await this.projectNative(this.positioned?clamp(this.position,bounds(this.input)):initial(this.input));if(this.view!==undefined)await this.view.applyConfig(next);}
+      catch(error){this.input.config=previous;try{this.applySafeArea(previous.safeAreaPolicy);await this.applyInteraction(previous);}catch(_){}throw error as Error;}
     });
+  }
+  private applySafeArea(policy: FxSafeAreaPolicy): void {
+    const native=this.requireNative();
+    if(native.setSafeAreaPolicy!==undefined)native.setSafeAreaPolicy(policy);
+    else if(policy!==FxSafeAreaPolicy.HOST)throw new FxError('CAPABILITY_UNSUPPORTED','Native adapter does not support explicit safe-area policy');
+  }
+  private async applyInteraction(config: FxConfig): Promise<void> {
+    const touchable=!config.layoutOnly && config.displayMode!==FxDisplayMode.DisplayOnly;
+    // Disable touch before restoring native focus; disable focus before enabling touch.
+    if(!touchable)await this.requireNative().setTouchable(false);
+    await this.applyFocus(config.focusPolicy);
+    if(touchable)await this.requireNative().setTouchable(true);
+  }
+  private async applyFocus(policy: FxFocusPolicy): Promise<void> {
+    const native=this.requireNative();
+    if(native.setFocusPolicy!==undefined)await native.setFocusPolicy(policy);
+    else if(policy!==FxFocusPolicy.DEFAULT)throw new FxError('CAPABILITY_UNSUPPORTED','Native adapter does not support explicit focus policy');
   }
   async show(): Promise<void> {this.assertAlive();if(this.fallback!==undefined)return this.fallback.show();if(this.view!==undefined)await this.view.show();try{await this.requireNative().show();}catch(error){if(this.view!==undefined)await this.view.hide();throw error as Error;}}
   async hide(): Promise<void> {this.cancelTouch(FxTouchCancelReason.HIDDEN);this.cancelAnimations();if(this.fallback!==undefined)return this.fallback.hide();if(this.native!==undefined){await this.native.hide();if(this.view!==undefined)await this.view.hide();}}
   async move(point: FxPoint, animate: boolean): Promise<FxPoint> {
-    this.pendingFrame=undefined;this.clock.cancel();return this.runMove(point,animate);
+    this.initialMeasurementPending=false;this.pendingFrame=undefined;this.clock.cancel();return this.runMove(point,animate);
   }
   private async runMove(point: FxPoint, animate: boolean, dragging: boolean = false): Promise<FxPoint> {
     this.assertAlive();if(this.fallback!==undefined)return this.fallback.move(point,animate);
@@ -127,7 +156,7 @@ export class FxSystemPlatform implements FxPlatform {
   }
   /** Coalesce drag frames while one native transaction is in flight. Final settle uses awaited move. */
   moveFrame(point: FxPoint): void {
-    this.pendingFrame=point;if(this.frameRunning)return;this.frameRunning=true;
+    this.initialMeasurementPending=false;this.pendingFrame=point;if(this.frameRunning)return;this.frameRunning=true;
     this.frameCompletion=this.drainFrames().finally(() => {this.frameRunning=false;if(this.pendingFrame!==undefined && !this.destroyed)this.moveFrame(this.pendingFrame);});this.observe(this.frameCompletion);
   }
   private async drainFrames(): Promise<void> {while(this.pendingFrame!==undefined && !this.destroyed){const point=this.pendingFrame;this.pendingFrame=undefined;await this.runMove(point,false,true);}}
@@ -137,11 +166,13 @@ export class FxSystemPlatform implements FxPlatform {
     const changed=size.width!==this.input.content.width || size.height!==this.input.content.height;
     if(!changed && !applied)return;
     const next: FxSize={width:size.width,height:size.height};
-    if(changed){this.cancelTouch(FxTouchCancelReason.LAYOUT_CHANGED);this.cancelAnimations();}
+    if(changed){if(this.input.config.boundaryMode!==FxBoundaryMode.ANDROID_2)this.cancelTouch(FxTouchCancelReason.LAYOUT_CHANGED);this.cancelAnimations();}
     this.layoutCompletion=this.enqueueNative(async () => {
       if(this.destroyed)return;const previous=this.input.content;this.input.content=next;
       try {
-        if(changed)await this.projectNative(this.position);
+        const first=applied && !this.measured && this.initialMeasurementPending && this.input.config.boundaryMode===FxBoundaryMode.ANDROID_2;
+        if(changed || first)await this.projectNative(first?initial(this.input):clamp(this.position,bounds(this.input)));
+        if(applied)this.initialMeasurementPending=false;
         if(applied){this.measured=true;this.notifyLayout();}
       }catch(error){this.input.content=previous;throw error as Error;}
     });this.observe(this.layoutCompletion);
@@ -166,7 +197,7 @@ export class FxSystemPlatform implements FxPlatform {
       oldViewport.insets.left!==viewport.insets.left || oldViewport.insets.top!==viewport.insets.top ||
       oldViewport.insets.right!==viewport.insets.right || oldViewport.insets.bottom!==viewport.insets.bottom || this.density!==viewport.density;
     const logical=this.input.config.boundaryMode===FxBoundaryMode.ANDROID_2 && !changed ? {x:point.x,y:point.y} :
-      (this.positioned ? remap(point,oldLimits,edge,bounds(this.input)) : clamp(point,bounds(this.input)));
+      (this.positioned ? (this.input.config.boundaryMode===FxBoundaryMode.ANDROID_2?resizePosition(point,oldViewport.size,this.input.content,this.input):remap(point,oldLimits,edge,bounds(this.input))) : initial(this.input));
     this.requestedPosition={x:logical.x,y:logical.y};
     const projection=project(logical,this.input);const d=viewport.density;
     const size: FxSize={width:Math.round(projection.visibleSize.width*d),height:Math.round(projection.visibleSize.height*d)};
@@ -203,9 +234,12 @@ export class FxSystemPlatform implements FxPlatform {
     return true;
   }
   private async cleanupNative(): Promise<void> {
+    let failure: Error | undefined;
+    try{if(this.releaseVisibility!==undefined)this.releaseVisibility();}catch(error){failure=error as Error;}this.releaseVisibility=undefined;
     const native=this.native;this.native=undefined;const view=this.view;this.view=undefined;
     try {if(native!==undefined)await native.destroy();}
     finally {try{if(view!==undefined)await view.destroy();}finally{if(this.releaseNative!==undefined)this.releaseNative();this.releaseNative=undefined;if(native!==undefined)this.lifecycle(FxEventType.DETACH);}}
+    if(failure!==undefined)throw failure;
   }
   private curve(t: number): number {switch(this.input.config.animation.curve){case FxAnimationCurve.LINEAR:return t;case FxAnimationCurve.EASE_IN:return t*t;case FxAnimationCurve.EASE_OUT:return 1-(1-t)*(1-t);default:return t*t*(3-2*t);}}
   private requireNative(): FxNativeWindow {if(this.native===undefined)throw new FxError('NO_HOST','System window is not created');return this.native;}

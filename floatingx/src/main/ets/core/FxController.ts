@@ -166,7 +166,7 @@ export class FxController {
         await this.requirePlatform().applyConfig(snapshot.copy());
         this.assertAlive(generation);
       }
-      this.config = snapshot;
+      this.config = snapshot;this.refreshState();
       if (this.created) this.configured = this.platformReady();
       if (this.created && this.platformReady()) this.readPosition();
       events.push(this.event(FxEventType.CONFIG));
@@ -238,7 +238,15 @@ export class FxController {
   }
   getX(): number { this.readPositionSafely(); return this.position.x; }
   getY(): number { this.readPositionSafely(); return this.position.y; }
-  isShow(): boolean { return this.visible; }
+  isLayoutReady(): boolean {return this.visible && this.hostVisible && this.platformReady() && (this.platform?.isActuallyVisible===undefined || this.platform.isActuallyVisible());}
+  isShow(): boolean { return !this.config.layoutOnly && this.isLayoutReady(); }
+  /** OS visibility loss invalidates current operations; only an explicit subsequent show restores intent. */
+  nativeHidden(): void {
+    if(this.state===FxState.DESTROYING || this.state===FxState.DESTROYED)return;
+    this.generation++;this.wanted=false;
+    this.cancelTouch(FxTouchCancelReason.HIDDEN);this.interruptAnimations();
+    const events: FxEvent[]=[];this.commitVisibility(false,events);this.refreshState();this.dispatch(events);
+  }
   getState(): FxState { return this.state; }
   getGeneration(): number { return this.generation; }
 
@@ -411,6 +419,7 @@ export class FxController {
 
   private assertAlive(generation: number): void {
     if (generation !== this.generation || this.state === FxState.DESTROYING || this.state === FxState.DESTROYED) {
+      if(this.state!==FxState.DESTROYING && this.state!==FxState.DESTROYED)throw new FxError('OPERATION_CANCELED','Native visibility changed during operation');
       throw this.destroyedError();
     }
   }
@@ -421,7 +430,7 @@ export class FxController {
   }
   private refreshState(): void {
     if (this.state === FxState.DESTROYING || this.state === FxState.DESTROYED) return;
-    this.state = this.visible ? FxState.VISIBLE : (this.created ? FxState.HIDDEN : FxState.IDLE);
+    this.state = this.visible ? (this.config.layoutOnly?FxState.PREPARED:FxState.VISIBLE) : (this.created ? FxState.HIDDEN : FxState.IDLE);
   }
   private validatePoint(point: FxPoint): void {
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new FxError('INVALID_GEOMETRY', 'Platform position must be finite');

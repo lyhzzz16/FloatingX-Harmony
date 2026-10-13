@@ -1,4 +1,4 @@
-import { FxPoint } from '../core/FxTypes';
+import { FxPoint, FxGestureMode } from '../core/FxTypes';
 export interface FxPointer { id: number; x: number; y: number; timeMs: number; }
 export type FxTouchKind = 'none' | 'drag' | 'click' | 'longPress' | 'end';
 export interface FxTouchResult { kind: FxTouchKind; position: FxPoint; }
@@ -14,7 +14,9 @@ export class FxTouch {
  private thresholdVp: number;
  private clickIntervalMs: number;
  private longPressMs: number;
- constructor(mode: string, thresholdVp: number, clickIntervalMs: number, longPressMs: number) {
+ private gestureMode: FxGestureMode;
+ constructor(mode: string, thresholdVp: number, clickIntervalMs: number, longPressMs: number, gestureMode: FxGestureMode = FxGestureMode.LEGACY) {
+   this.gestureMode=gestureMode;
    this.mode=mode; this.thresholdVp=thresholdVp; this.clickIntervalMs=clickIntervalMs; this.longPressMs=longPressMs;
  }
  down(pointer: FxPointer, position: FxPoint = {x:0,y:0}): FxTouchResult {
@@ -27,18 +29,29 @@ export class FxTouch {
    const primary = this.primary;
    if (primary === undefined || pointer.id !== primary.id || this.longPressed) return this.result('none');
    const dx = pointer.x-primary.x; const dy = pointer.y-primary.y;
-   if (Math.sqrt(dx*dx+dy*dy)>this.thresholdVp) this.displaced = true;
+   if (this.gestureMode === FxGestureMode.ANDROID_2 ? Math.abs(dx)>=this.thresholdVp || Math.abs(dy)>=this.thresholdVp : Math.sqrt(dx*dx+dy*dy)>this.thresholdVp) this.displaced = true;
    if (this.displaced) {
      if (this.mode === 'ClickOnly' || this.mode === 'click-only') return this.result('none');
      this.position = {x:this.origin.x+dx,y:this.origin.y+dy}; return this.result('drag');
    }
-   if (pointer.timeMs-primary.timeMs >= this.longPressMs) {
+   if (this.gestureMode === FxGestureMode.LEGACY && pointer.timeMs-primary.timeMs >= this.longPressMs) {
      this.longPressed = true; return this.result('longPress');
    }
    return this.result('none');
  }
  up(pointer: FxPointer): FxTouchResult {
    if (this.primary === undefined || pointer.id !== this.primary.id) return this.result('none');
+   if (this.gestureMode === FxGestureMode.ANDROID_2) {
+     // Android checks displacement on MOVE, then classifies duration on release.
+     const duration=pointer.timeMs-this.primary.timeMs;
+     let kind: FxTouchKind='end';
+     if (!this.displaced) {
+       if (duration<150 && pointer.timeMs-this.lastClick>=this.clickIntervalMs) kind='click';
+       else if (duration>=500) kind='longPress';
+     }
+     if (kind==='click') this.lastClick=pointer.timeMs;
+     this.primary=undefined;return this.result(kind);
+   }
    const update = this.move(pointer);
    const kind = update.kind === 'longPress' ? 'longPress' :
      (!this.displaced && !this.longPressed && pointer.timeMs-this.lastClick>=this.clickIntervalMs ? 'click' : 'end');

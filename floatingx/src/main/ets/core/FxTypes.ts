@@ -70,3 +70,11 @@ export interface FxTouchSnapshot {
   cancelReason?: FxTouchCancelReason;
 }
 export enum FxReleaseDecision { DEFAULT = 'default', CONSUMED = 'consumed' }
+
+/** LEGACY preserves the original surface; ANDROID_2 uses the 2.3.7 axis/release timing contract. */
+export enum FxGestureMode { LEGACY = 'legacy', ANDROID_2 = 'android-2' }
+/** DEFAULT retains native creation policy; NON_FOCUSABLE matches Android's default overlay flags. */
+export enum FxFocusPolicy { DEFAULT = 'default', NON_FOCUSABLE = 'non-focusable' }
+
+/** HOST preserves the measured host; AVOID_SYSTEM clips only intersecting system avoid areas. */
+export enum FxSafeAreaPolicy { HOST = 'host', AVOID_SYSTEM = 'avoid-system', EXTEND = 'extend' }

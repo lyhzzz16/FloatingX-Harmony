@@ -36,7 +36,7 @@ export interface FxAppOptions<T extends Object> extends FxContentOptions<T> {
 }
 export interface FxSystemFallback { host: FxWindowHost; pagePolicy?: FxPagePolicy; }
 export interface FxSystemOptions<T extends Object> extends FxContentOptions<T> {
-  tag: string; context: common.UIAbilityContext; size: FxSize; fallback?: FxSystemFallback; storage?: FxInstallStorageOptions;
+  tag: string; context: common.UIAbilityContext; size: FxSize; viewportHost?: FxWindowHost; fallback?: FxSystemFallback; storage?: FxInstallStorageOptions;
 }
 /** Retain the factory result to update content without erasing its parameter type. */
 export class FxControl<T extends Object> implements FxControlHandle {
@@ -63,7 +63,7 @@ export class FxControl<T extends Object> implements FxControlHandle {
   }
   /** Applies parameters, waits for a fresh measured native layout and System projection, then returns detached geometry. */
   async updateContentAndWaitForLayout(params: T): Promise<FxGeometrySnapshot> {
-    if(!this.controller.isShow())throw new FxError('NO_HOST','Layout completion requires visible mounted content');
+    if(!this.controller.isLayoutReady())throw new FxError('NO_HOST','Layout completion requires mounted content; use show with layoutOnly for invisible measurement');
     const revision=++this.contentRevision;
     const generation=this.controller.getGeneration();
     const valid=() => generation===this.controller.getGeneration() && this.controller.getState()!==FxState.DESTROYING && this.controller.getState()!==FxState.DESTROYED;
@@ -147,7 +147,7 @@ export class FloatingX {
     }
     const source=contentSource(options.content);
     const input: FxGeometryInput={viewport:{size:{width:options.size.width,height:options.size.height},insets:{left:0,top:0,right:0,bottom:0}},content:{width:options.size.width,height:options.size.height},config:config};
-    const platform=new FxSystemPlatform(new FxNativeWindowFactory(options.context,source,options.interactions),input,fallback);
+    const platform=new FxSystemPlatform(new FxNativeWindowFactory(options.context,source,options.interactions,options.viewportHost),input,fallback);
     return make(scoped,config,platform,() => platform.getGeometry(),options.tag);
   }
   static control(tag: string): FxControlHandle { const control=controls.get(tag);if(control===undefined)throw new FxError('NOT_INSTALLED','Float tag is not installed');return control; }

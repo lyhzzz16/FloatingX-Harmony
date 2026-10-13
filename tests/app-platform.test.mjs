@@ -112,3 +112,8 @@ test('real app adapter retains right edge and relative y through live overlay re
  s.p.layoutHost({width:500,height:300});assert.deepEqual(s.p.getPosition(),{x:450,y:125});assert.equal(s.p.getSnapshot().projection.visibleSize.width,25);
  s.p.layoutHost({width:300,height:500});assert.deepEqual(s.p.getPosition(),{x:250,y:225});await s.host.dispose();
 });
+test('unchanged App viewport does not turn a config update into resize adsorption',async()=>{
+ const s=await setup();await s.c.show();await s.c.move(80,90);
+ await s.c.updateConfig(new FxConfig({boundaryMode:'android-2',adsorb:true}));
+ assert.deepEqual(s.p.getPosition(),{x:80,y:90});await s.host.dispose();
+});

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { FxConfig } from '../work/core/core/FxConfig.js';
 import { FxError } from '../work/core/core/FxError.js';
 import { FxGravity, FxEdgeAdsorb, FxEdge } from '../work/core/core/FxTypes.js';
-import { bounds, initial, clamp, settle, restore, project } from '../work/core/geometry/FxGeometry.js';
+import { bounds, initial, clamp, settle, restore, project, resizePosition } from '../work/core/geometry/FxGeometry.js';
 
 function input(options = {}, width = 300, height = 500) {
   return { viewport: { size: { width, height }, insets: { left: 0, top: 0, right: 0, bottom: 0 } },
@@ -156,4 +156,20 @@ test('Android 2.3.7 bounds reproduce moveIngBoundary and moveBoundary numeric fi
  assert.deepEqual(project({x:280,y:100},i),{position:{x:280,y:100},visibleSize:{width:20,height:60},contentOffset:{x:0,y:0}});
  assert.deepEqual(project({x:-20,y:100},i),{position:{x:0,y:100},visibleSize:{width:60,height:60},contentOffset:{x:-20,y:0}});
  i.config.adsorb=false;assert.deepEqual(settle({x:80,y:24},i),{x:80,y:24});
+});
+
+test('Android initial gravity uses full content, explicit XY bypasses offset, resize preserves absolute coordinates',()=>{
+ const make=(options={})=>({viewport:{size:{width:400,height:800},insets:{left:0,top:24,right:0,bottom:20}},content:{width:100,height:60},config:new FxConfig({boundaryMode:'android-2',halfHide:true,halfHideRatio:.5,adsorb:false,gravity:'top-right',...options})});
+ assert.deepEqual(initial(make()),{x:300,y:24});
+ assert.deepEqual(initial(make({margin:{left:10,right:30,top:40,bottom:50},offset:{x:5,y:6}})),{x:275,y:64});
+ assert.deepEqual(initial(make({position:{x:80,y:100},offset:{x:99,y:99}})),{x:80,y:100});
+ assert.deepEqual(resizePosition({x:300,y:200},{width:400,height:1200},{width:100,height:60},make()),{x:300,y:200});
+ assert.deepEqual(restore({version:1,position:{x:150,y:200},viewport:{width:500,height:1200},edge:'none'},make()),{x:150,y:200});
+ assert.equal(settle({x:150,y:200},make({adsorb:true})).x,350,'center tie follows Android right');
+ assert.equal(resizePosition({x:140,y:200},{width:400,height:1200},{width:100,height:60},make({adsorb:true})).x,-50);
+});
+test('explicit avoid policy clips a half-hidden surface to the authoritative safe rectangle',()=>{
+ const g=input({boundaryMode:'android-2',safeAreaPolicy:'avoid-system',halfHide:true});
+ g.viewport.insets={left:20,top:24,right:10,bottom:16};
+ const p=project({x:-5,y:24},g);assert.deepEqual(p.position,{x:20,y:24});assert.deepEqual(p.contentOffset,{x:-25,y:0});assert.equal(p.visibleSize.width,25);
 });

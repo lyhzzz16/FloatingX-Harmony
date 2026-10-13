@@ -142,3 +142,12 @@ test('public layout wait rejects hidden content instead of waiting for an absent
  const source=content();const control=FloatingX.createScope({content:source,config:new FxConfig()});
  await assert.rejects(control.updateContentAndWaitForLayout({label:'hidden'}),{code:'NO_HOST'});await control.cancel();
 });
+
+test('public layoutOnly prepares invisible measured content, moves, then reveals without re-mounting',async()=>{
+ const source=content();const config=new FxConfig({layoutOnly:true,adsorb:false});const control=FloatingX.createScope({content:source,config});
+ const platform=require('../work/core/scope/FxHostBinding.js').scopeHostBinding(control).platform;
+ platform.mountHost(new ScopeContext(),contentSource(source));platform.layoutHost({width:300,height:500});await control.show();
+ assert.equal(control.isShow(),false);assert.equal(control.getState(),'prepared');
+ const frame=frames.at(-1);const pending=control.updateContentAndWaitForLayout({label:'prepared'});await Promise.resolve();completeLayout(frame);await pending;
+ await control.move(90,100);config.layoutOnly=false;await control.updateConfig(config);assert.equal(control.isShow(),true);assert.equal(control.getState(),'visible');assert.equal(frames.at(-1),frame);assert.equal(control.getX(),90);await control.cancel();
+});

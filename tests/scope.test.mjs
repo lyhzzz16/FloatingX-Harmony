@@ -236,3 +236,33 @@ test('observer cannot mutate the release decision snapshot',async()=>{
  const s=await setup({}, {onTouch:e=>{e.position.x=999;},onRelease:e=>{assert.equal(e.position.x,20);return 'default';}});
  s.platform.handleTouch(touch(0,1,0,0,0));s.platform.handleTouch(touch(2,1,20,20,10));s.platform.handleTouch(touch(1,1,20,20,20));await s.controller.cancel();
 });
+
+test('Android resize retains primary pointer, absolute origin and one release',async()=>{
+ const seen=[];let releases=0;const s=await setup({boundaryMode:'android-2',gestureMode:'android-2',touchSlopVp:8,position:{x:20,y:80}},{onTouch:e=>seen.push(e),onRelease:()=>{releases++;return 'default';}});
+ s.platform.handleTouch(touch(0,1,100,100,0));s.platform.handleTouch(touch(2,1,120,130,50));s.platform.layoutContent({width:90,height:60},true);
+ s.platform.handleTouch(touch(2,1,125,135,800));assert.deepEqual(s.platform.getPosition(),{x:45,y:115});
+ s.platform.handleTouch(touch(1,2,500,500,900));s.platform.handleTouch(touch(1,1,125,135,900));
+ assert.equal(releases,1);assert.deepEqual(seen.map(e=>e.phase),['down','move','move','up']);assert.deepEqual(seen.at(-1).delta,{x:25,y:35});await s.controller.cancel();
+});
+test('native child tap is observer-only; background tap and owned pan may release',async()=>{
+ let releases=0,clicks=0;const s=await setup({boundaryMode:'android-2',gestureMode:'android-2',touchSlopVp:8},{onRelease:()=>{releases++;return 'default';},onClick:()=>clicks++});
+ s.platform.handleTouch(touch(0,1,10,10,0),true);s.platform.handleTouch(touch(1,1,10,10,50),true);await Promise.resolve();assert.equal(releases,0);assert.equal(clicks,0);
+ s.platform.handleTouch(touch(0,1,10,10,400),true);s.platform.completeSurfaceTap();s.platform.handleTouch(touch(1,1,10,10,450),true);await Promise.resolve();assert.equal(releases,1);assert.equal(clicks,1);
+ s.platform.handleTouch(touch(0,1,10,10,800),true);s.platform.handleTouch(touch(2,1,18,10,850),true);assert.equal(s.platform.getPosition().x,0);
+ s.platform.handlePan({fingerList:[{id:1,globalX:18,globalY:10}],timestamp:850000000});assert.equal(s.platform.getPosition().x,8);
+ s.platform.handleTouch(touch(1,1,18,10,900),true);assert.equal(releases,2);assert.equal(clicks,1);await s.controller.cancel();
+});
+test('first measured Android gravity corrects declared size unless a caller already placed the view',async()=>{
+ const s=await setup({boundaryMode:'android-2',gravity:'top-right',halfHide:true});
+ s.platform.layoutContent({width:100,height:60},true);assert.equal(s.platform.getPosition().x,200);await s.controller.cancel();
+ const moved=await setup({boundaryMode:'android-2',gravity:'top-right',halfHide:true});await moved.controller.move(75,100);
+ moved.platform.layoutContent({width:100,height:60},true);assert.deepEqual(moved.platform.getPosition(),{x:75,y:100});await moved.controller.cancel();
+});
+test('Android parent long callback requires click listener and local Scope rejects unowned safe areas',async()=>{
+ let longs=0;const s=await setup({gestureMode:'android-2',touchSlopVp:8},{onLongPress:()=>longs++});
+ s.platform.handleTouch(touch(TouchType.Down,1,50,50,0));s.platform.handleTouch(touch(TouchType.Up,1,50,50,600));
+ assert.equal(longs,0);s.platform.interactions.onClick=()=>{};
+ s.platform.handleTouch(touch(TouchType.Down,1,50,50,1000));s.platform.handleTouch(touch(TouchType.Up,1,50,50,1600));assert.equal(longs,1);
+ await assert.rejects(s.controller.updateConfig(new FxConfig({safeAreaPolicy:'avoid-system'})),{code:'CAPABILITY_UNSUPPORTED'});
+ await s.controller.cancel();
+});

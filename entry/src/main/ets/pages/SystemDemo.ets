@@ -1,10 +1,10 @@
 import common from '@ohos.app.ability.common';
-import { FloatingX, FxWindowHost, FxContent, FxControl, FxConfig, FxBoundaryMode, FxReleaseDecision, FxDisplayMode, FxSystemFallback } from 'floatingx';
+import { FloatingX, FxWindowHost, FxContent, FxControl, FxConfig, FxBoundaryMode, FxGestureMode, FxFocusPolicy, FxReleaseDecision, FxDisplayMode, FxSystemFallback } from 'floatingx';
 import { DemoOwner, DemoPageOwner } from '../entryability/DemoOwner';
 class SystemContentParams {width: number;close: () => void;constructor(close: () => void,width: number = 220) {this.width=width;this.close=close;}}
 @Builder
 function systemContent(params: SystemContentParams) {
-  Column() {Text('系统浮窗：拖动标题').height(40);Button('关闭').onClick(params.close)}.width(params.width).height(90).backgroundColor('#FFEACA').borderRadius(12)
+  Column() {Text('系统浮窗：按钮也可起拖').height(40);Button('关闭').onClick(params.close)}.width(params.width).height(90).backgroundColor('#FFEACA').borderRadius(12)
 }
 @Component
 export struct SystemDemo {
@@ -28,8 +28,8 @@ export struct SystemDemo {
     const control=FloatingX.installSystem({tag:'system-demo',
       context:this.getUIContext().getHostContext() as common.UIAbilityContext,
       content:new FxContent(wrapBuilder(systemContent),new SystemContentParams(() => {if(this.control!==undefined)this.run(this.control.cancel());}),{width:220,height:90}),
-      size:{width:220,height:90},config:new FxConfig({boundaryMode:FxBoundaryMode.ANDROID_2,halfHide:true,position:{x:20,y:100},adsorb:false}),
-      fallback:fallback,interactions:{dragArea:{x:0,y:0,width:220,height:40},
+      size:{width:220,height:90},config:new FxConfig({boundaryMode:FxBoundaryMode.ANDROID_2,gestureMode:FxGestureMode.ANDROID_2,touchSlopVp:8,focusPolicy:FxFocusPolicy.NON_FOCUSABLE,halfHide:true,position:{x:20,y:100},adsorb:false}),
+      fallback:fallback,interactions:{
         onTouch:(event) => {if(this.pageOwner.isActive())this.message=event.phase+' delta='+event.delta.x.toFixed(1)+','+event.delta.y.toFixed(1);},
         onRelease:() => this.consumed?FxReleaseDecision.CONSUMED:FxReleaseDecision.DEFAULT},
       events:(event) => {if(this.pageOwner.isActive())this.message='actualScope='+event.actualScope+(event.error===undefined?'':'; '+event.error.code+': '+event.error.message);}});

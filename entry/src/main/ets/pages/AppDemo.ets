@@ -1,4 +1,4 @@
-import { FloatingX, FxWindowHost, FxContent, FxControl, FxConfig, FxBoundaryMode, FxReleaseDecision, FxMemoryStorage } from 'floatingx';
+import { FloatingX, FxWindowHost, FxContent, FxControl, FxConfig, FxBoundaryMode, FxGestureMode, FxFocusPolicy, FxReleaseDecision, FxMemoryStorage } from 'floatingx';
 import { DemoPageOwner } from '../entryability/DemoOwner';
 class AppContentParams {
   width: number;
@@ -9,7 +9,7 @@ class AppContentParams {
 @Builder
 function appContent(params: AppContentParams) {
   Column({space:4}) {
-    Text('应用浮窗：拖动标题').height(40)
+    Text('应用浮窗：按钮也可起拖').height(40)
     Row({space:4}) { Button('内按钮').onClick(params.button); Button('关闭').onClick(params.close) }
   }.width(params.width).height(100).backgroundColor('#E4F2FF').borderRadius(12)
 }
@@ -33,15 +33,15 @@ export struct AppDemo {
       () => { if(this.controller!==undefined) this.run(this.controller.cancel()); },() => { this.message='内按钮已点击'; }),{width:240,height:100});
     // README app snippet. WindowHost is created after WindowStage.loadContent.
     const controller=FloatingX.installApp({tag:'app-demo',host:host,content:content,
-      config:new FxConfig({boundaryMode:FxBoundaryMode.ANDROID_2,halfHide:true,position:{x:20,y:120},adsorb:false}),
+      config:new FxConfig({boundaryMode:FxBoundaryMode.ANDROID_2,gestureMode:FxGestureMode.ANDROID_2,touchSlopVp:8,focusPolicy:FxFocusPolicy.NON_FOCUSABLE,halfHide:true,position:{x:20,y:120},adsorb:false}),
       pagePolicy:{mode:'blacklist',names:['Blocked']},
       storage:{namespace:'demo',storage:new FxMemoryStorage()},
-      interactions:{dragArea:{x:0,y:0,width:240,height:40},
+      interactions:{
         onTouch:(event) => {if(this.pageOwner.isActive())this.message=event.phase+' delta='+event.delta.x.toFixed(1)+','+event.delta.y.toFixed(1);},
         onRelease:() => this.consumed?FxReleaseDecision.CONSUMED:FxReleaseDecision.DEFAULT}});
     if(!this.pageOwner.hold(controller))return;
     this.controller=controller;
-    this.message='API 12 应用内浮窗'; this.run(controller.show());
+    this.message='API 20+ 整窗手势；示例阈值 8vp'; this.run(controller.show());
   }
   private async resize(): Promise<void> {
     const control=this.controller;if(control===undefined)return;

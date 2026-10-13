@@ -47,14 +47,15 @@ export class FxAppPlatform implements FxPlatform {
   isHostVisible(): boolean { return this.eligible(); }
   isReadyToShow(): boolean { return this.layer!==undefined && this.engine.isHostVisible(); }
   subscribeLifecycle(listener: (type: FxEventType) => void): () => void { return this.engine.subscribeLifecycle(listener); }
-  layoutHost(size: FxSize): void {
+  layoutHost(size: FxSize, origin: FxPoint = {x:0,y:0}): void {
     if(this.destroyed || !this.host.isValid() || this.layer===undefined) return;
-    const current=this.engine.getGeometry().viewport.size;
-    if(this.engine.isHostVisible() && current.width===size.width && current.height===size.height) return;
-    this.host.measure(size); this.engine.layoutHost(size); this.syncEligibility();
+    this.host.measure(size,origin);
+    this.syncViewport();this.syncEligibility();
   }
   layoutContent(size: FxSize): void { if(!this.destroyed && this.host.isValid()) this.engine.layoutContent(size); }
-  handleTouch(event: TouchEvent): void { if(this.isHostVisible() && this.isReadyToShow()) this.engine.handleTouch(event); }
+  handleTouch(event: TouchEvent, observeOnly: boolean = false): void { if(this.isHostVisible() && this.isReadyToShow()) this.engine.handleTouch(event,observeOnly); }
+  handlePan(event: GestureEvent): void {this.engine.handlePan(event);}
+  completeSurfaceTap(): void {this.engine.completeSurfaceTap();}
   cancelAnimations(): void { this.engine.cancelAnimations(); }
   async create(): Promise<void> {
     this.assertAlive(); if(this.layer!==undefined) return;
@@ -71,7 +72,13 @@ export class FxAppPlatform implements FxPlatform {
       throw error as Error;
     }
   }
-  async applyConfig(config: FxConfig): Promise<void> { this.assertAlive(); await this.engine.applyConfig(config); }
+  async applyConfig(config: FxConfig): Promise<void> {
+    this.assertAlive();
+    // Validate authority before changing either configuration or geometry.
+    this.host.getViewport(config.safeAreaPolicy);
+    await this.engine.applyConfig(config);
+    this.syncViewport();
+  }
   async show(): Promise<void> {
     this.assertAlive(); if(!this.isHostVisible() || !this.isReadyToShow() || this.layer===undefined) return;
     this.host.show(this.layer); await this.engine.show();
@@ -97,10 +104,18 @@ export class FxAppPlatform implements FxPlatform {
       }
     }
   }
+  private syncViewport(): void {
+    if(!this.engine.isHostVisible() && this.layer===undefined)return;
+    const viewport=this.host.getViewport(this.engine.getSnapshot().config.safeAreaPolicy);
+    const current=this.engine.getGeometry().viewport;
+    if(current.size.width===viewport.size.width && current.size.height===viewport.size.height && current.insets.left===viewport.insets.left && current.insets.top===viewport.insets.top && current.insets.right===viewport.insets.right && current.insets.bottom===viewport.insets.bottom)return;
+    this.engine.layoutHost(viewport.size,viewport.insets);
+  }
   private eligible(): boolean { return !this.destroyed && this.host.isForeground() && allowsPage(this.policy,this.host.getPage()); }
   private syncEligibility(): void {
     if(this.destroyed) return;
-    this.engine.cancelAnimations(); this.engine.cancelTouch();
+    try {this.syncViewport();}catch(error){this.controller?.reportError(error as Error);}
+    if(!this.eligible()){this.engine.cancelAnimations();this.engine.cancelTouch();}
     if(this.layer!==undefined && this.host.isValid()) {
       try { if(this.eligible()) this.host.show(this.layer); else this.host.hide(this.layer); }
       catch(error) { if(this.controller!==undefined) this.controller.reportError(error as Error); }

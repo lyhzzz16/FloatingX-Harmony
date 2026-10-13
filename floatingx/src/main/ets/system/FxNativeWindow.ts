@@ -1,4 +1,4 @@
-import { FxPoint, FxSize, FxViewport, FxProjection, FxTouchCancelReason } from '../core/FxTypes';
+import { FxPoint, FxSize, FxViewport, FxProjection, FxTouchCancelReason, FxFocusPolicy, FxSafeAreaPolicy } from '../core/FxTypes';
 import { FxGeometryInput } from '../geometry/FxGeometry';
 import { FxConfig } from '../core/FxConfig';
 import { FxController } from '../core/FxController';
@@ -10,6 +10,7 @@ export interface FxSystemView {
   applyConfig(config: FxConfig): Promise<void>;
   show(): Promise<void>; hide(): Promise<void>; destroy(): Promise<void>;
   cancelAnimations(): void;
+  nativeHidden?(): void;
   cancelTouch?(reason: FxTouchCancelReason): void;
   adoptPosition(point: FxPoint): void;
 }
@@ -35,8 +36,12 @@ export interface FxNativeWindow {
   load(owner: FxSystemOwner): Promise<void>;
   show(): Promise<void>; hide(): Promise<void>; destroy(): Promise<void>;
   resize(size: FxSize): Promise<void>;
+  setSafeAreaPolicy?(policy: FxSafeAreaPolicy): void;
+  setFocusPolicy?(policy: FxFocusPolicy): Promise<void>;
   setTouchable(touchable: boolean): Promise<void>; setBackground(color: string): Promise<void>;
   movePx(point: FxPoint): Promise<FxNativeRect>;
+  isShowing?(): boolean;
+  subscribeVisibility?(listener: (destroyed: boolean) => void): () => void;
   getViewport(): FxNativeViewport; getRect(): FxNativeRect;
   subscribe(listener: () => void): () => void;
 }
