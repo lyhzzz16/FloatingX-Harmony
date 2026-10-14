@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const ts=require('typescript');
+let activeScopeContext;
 /** Execute production non-component .ets classes with only the SDK native node boundary substituted.
  * This is host behavioral coverage, not ArkTS or device acceptance. Genuine SDK build is separate. */
 export function loadScopePlatform() {
@@ -13,9 +14,16 @@ export function loadScopePlatform() {
  fs.writeFileSync(destination,ts.transpileModule(fs.readFileSync(source,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText);
  globalThis.Curve={Ease:'ease',Linear:'linear',EaseIn:'in',EaseOut:'out',EaseInOut:'inout'};
  globalThis.TouchType={Down:0,Up:1,Move:2,Cancel:3};
- return require(destination).FxScopePlatform;
+ globalThis.PanGestureOptions=class {
+  getDistance(){if(!activeScopeContext)throw Error('Pan distance read outside UIContext');activeScopeContext.panDistanceReads++;return activeScopeContext.panDistance;}
+ };
+ const Module=require('node:module');const original=Module._load;
+ Module._load=function(name,...args){if(name==='@ohos.deviceInfo')return {default:{sdkApiVersion:26}};return original.call(this,name,...args);};
+ try{return require(destination).FxScopePlatform;}finally{Module._load=original;}
 }
 export class ScopeContext {
+ panDistance=6;panDistanceReads=0;
+ runScopedTask(callback){const previous=activeScopeContext;activeScopeContext=this;try{callback();}finally{activeScopeContext=previous;}}
  vp2px(value){return value;}
  px2vp(value){return value;}
  finishes=[];
@@ -56,7 +64,7 @@ export function loadSystemAdapter(nativeBoundary) {
  fs.writeFileSync(destination,ts.transpileModule(fs.readFileSync(path.join(root,'floatingx/src/main/ets/system/FxWindowAdapter.ets'),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText);
  const Module=require('node:module');const original=Module._load;
  Module._load=function(name,...args){
-  if(name==='@ohos.window')return {default:{WindowType:{TYPE_FLOAT:8},RectChangeReason:{UNDEFINED:0,MOVE:3},createWindow:async config=>{nativeBoundary.created.push(config);return nativeBoundary.window;}}};
+  if(name==='@ohos.window')return {default:{WindowEventType:{WINDOW_SHOWN:1,WINDOW_HIDDEN:4,WINDOW_DESTROYED:7},WindowType:{TYPE_FLOAT:8},RectChangeReason:{UNDEFINED:0,MOVE:3},createWindow:async config=>{nativeBoundary.created.push(config);return nativeBoundary.window;}}};
   if(name==='@ohos.display')return {default:{getDisplayByIdSync:id=>{nativeBoundary.displayReads.push(id);return nativeBoundary.display;},on:(_name,listener)=>{nativeBoundary.displayListener=listener;},off:()=>{nativeBoundary.displayListener=undefined;}}};
   if(name==='@ohos.abilityAccessCtrl')return {default:{GrantStatus:{PERMISSION_GRANTED:0},createAtManager:()=>({checkAccessToken:async(...args)=>{nativeBoundary.permissionReads.push(args);if(nativeBoundary.accessError)throw nativeBoundary.accessError;return nativeBoundary.grant;}})}};
   if(name==='@ohos.bundle.bundleManager')return {default:{BundleFlag:{GET_BUNDLE_INFO_WITH_APPLICATION:1},getBundleInfoForSelf:async()=>({appInfo:{accessTokenId:123}})}};
@@ -65,4 +73,20 @@ export function loadSystemAdapter(nativeBoundary) {
  globalThis.LocalStorage=class{data=new Map();setOrCreate(k,v){this.data.set(k,v);}get(k){return this.data.get(k);}};
  delete require.cache[destination];
  try{return require(destination);}finally{Module._load=original;}
+}
+
+/** Execute only the component's policy methods; ArkUI build DSL and native hit dispatch are not simulated. */
+export function loadFloatViewPolicy(sdkApiVersion=26) {
+ const root=path.resolve(import.meta.dirname,'../..');const file=path.join(root,'floatingx/src/main/ets/component/FxFloatView.ets');
+ const source=fs.readFileSync(file,'utf8');
+ const methods=source.slice(0,source.indexOf('  @Builder')).replace('@Component\n','').replace('export struct FxFloatView','export class FxFloatView').replace('@Prop ','')+'\n}';
+ const destination=path.join(root,'work/core/component/FxFloatViewPolicy.js');
+ fs.writeFileSync(destination,ts.transpileModule(methods,{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText);
+ const device={sdkApiVersion};
+ globalThis.HitTestMode={Default:0,Block:1,Transparent:2,None:3,BLOCK_HIERARCHY:4};
+ globalThis.GestureJudgeResult={CONTINUE:0,REJECT:1};
+ const Module=require('node:module');const original=Module._load;
+ Module._load=function(name,...args){if(name==='@ohos.deviceInfo')return {default:device};return original.call(this,name,...args);};
+ delete require.cache[destination];
+ try{return {FxFloatView:require(destination).FxFloatView,device};}finally{Module._load=original;}
 }

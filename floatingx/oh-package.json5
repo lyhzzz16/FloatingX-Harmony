@@ -1,7 +1,7 @@
 {
   "modelVersion": "5.0.0",
   "name": "floatingx",
-  "version": "0.1.0",
+  "version": "0.1.1-yb.6",
   "description": "FloatingX-Harmony floating window library for HarmonyOS Stage applications",
   "main": "Index.ets",
   "dependencies": {},
@@ -9,6 +9,6 @@
   "author": "Petterp",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Petterpx/FloatingX-Harmony"
+    "url": "https://github.com/lyhzzz16/FloatingX-Harmony"
   }
 }

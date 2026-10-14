@@ -1,6 +1,6 @@
 // API12 named HAR route registration must remain reachable from the public import.
 import './src/main/ets/system/FxSystemPage';
-export const FLOATINGX_VERSION: string = '0.1.0';
+export const FLOATINGX_VERSION: string = '0.1.1-yb.6';
 export { FloatingX, FxControl, FxControlHandle, FxScopeOptions, FxAppOptions, FxSystemOptions, FxSystemFallback, FxInstallStorageOptions, FxScopeStorageOptions } from './src/main/ets/FloatingX';
 export { FxConfig, FxConfigOptions } from './src/main/ets/core/FxConfig';
 export { FxError, FxUninstallError, FxUninstallFailure } from './src/main/ets/core/FxError';
@@ -14,3 +14,5 @@ export { FxPagePolicy } from './src/main/ets/app/FxPageFilter';
 export { FxStorage } from './src/main/ets/storage/FxStorage';
 export { FxMemoryStorage } from './src/main/ets/storage/FxMemoryStorage';
 export { FxPreferencesStorage } from './src/main/ets/storage/FxPreferencesStorage';
+export { FxSafeAreaPolicy, FxGestureMode, FxFocusPolicy, FxBoundaryMode, FxGeometrySnapshot, FxLayoutListener, FxTouchPhase, FxTouchSnapshot,
+  FxTouchCancelReason, FxReleaseDecision } from './src/main/ets/core/FxTypes';
