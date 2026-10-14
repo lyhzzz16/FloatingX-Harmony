@@ -7,8 +7,8 @@ const {FxConfig}=require('../work/core/core/FxConfig.js');
 const {FxController}=require('../work/core/core/FxController.js');
 const FxScopePlatform=loadScopePlatform();
 const touch=(type,id,x,y,timeMs)=>({type,changedTouches:[{id,windowX:x,windowY:y}],timestamp:timeMs*1000000});
-async function setup(options={},interactions={}) {
- const platform=new FxScopePlatform(interactions); const events=[];
+async function setup(options={},interactions={},clock) {
+ const platform=new FxScopePlatform(interactions,undefined,clock); const events=[];
  const config=new FxConfig({adsorb:false,...options});
  const controller=new FxController(platform,config,e=>events.push(e.type),{error() {}});
  const content=new ScopeContent(); const context=new ScopeContext(); platform.bindController(controller);
@@ -259,10 +259,120 @@ test('first measured Android gravity corrects declared size unless a caller alre
  moved.platform.layoutContent({width:100,height:60},true);assert.deepEqual(moved.platform.getPosition(),{x:75,y:100});await moved.controller.cancel();
 });
 test('Android parent long callback requires click listener and local Scope rejects unowned safe areas',async()=>{
- let longs=0;const s=await setup({gestureMode:'android-2',touchSlopVp:8},{onLongPress:()=>longs++});
- s.platform.handleTouch(touch(TouchType.Down,1,50,50,0));s.platform.handleTouch(touch(TouchType.Up,1,50,50,600));
+ let longs=0;let now=0;const clock={now:()=>now};const s=await setup({gestureMode:'android-2',touchSlopVp:8},{onLongPress:()=>longs++},clock);
+ s.platform.handleTouch(touch(TouchType.Down,1,50,50,0));now=600;s.platform.handleTouch(touch(TouchType.Up,1,50,50,600));
  assert.equal(longs,0);s.platform.interactions.onClick=()=>{};
- s.platform.handleTouch(touch(TouchType.Down,1,50,50,1000));s.platform.handleTouch(touch(TouchType.Up,1,50,50,1600));assert.equal(longs,1);
+ now=1000;s.platform.handleTouch(touch(TouchType.Down,1,50,50,1000));now=1600;s.platform.handleTouch(touch(TouchType.Up,1,50,50,1600));assert.equal(longs,1);
  await assert.rejects(s.controller.updateConfig(new FxConfig({safeAreaPolicy:'avoid-system'})),{code:'CAPABILITY_UNSUPPORTED'});
  await s.controller.cancel();
+});
+
+test('Android default slop is host scoped and preserves the axis OR boundary',async()=>{
+ const first=await setup({position:{x:20,y:20}});const second=await setup({position:{x:20,y:20}});
+ first.context.panDistance=6;second.context.panDistance=11;
+ const options=new FxConfig({adsorb:false,gestureMode:'android-2'});
+ for(const s of [first,second]) {
+  await s.controller.updateConfig(options);
+  const distance=s.context.panDistance;
+  assert.equal(s.platform.getSnapshot().config.touchSlopVp,distance);
+  assert.equal(s.context.panDistanceReads,1);assert.equal(options.touchSlopVp,undefined);
+  s.platform.handleTouch(touch(0,1,100,100,0),true);
+  s.platform.handleTouch(touch(2,1,100+distance-1,100+distance-1,10),true);
+  assert.equal(s.platform.canStartPan({fingerList:[{id:1,globalX:100+distance-1,globalY:100+distance-1}]}),false);
+  assert.deepEqual(s.platform.getPosition(),{x:20,y:20},'diagonal length must not start a drag');
+  const pan={fingerList:[{id:1,globalX:100+distance,globalY:100}],timestamp:20000000};
+  assert.equal(s.platform.canStartPan(pan),true);s.platform.handlePan(pan,true);
+  assert.deepEqual(s.platform.getPosition(),{x:20,y:20},'takeover frame only cancels child');
+  s.platform.handlePan({...pan,timestamp:21000000});
+  assert.deepEqual(s.platform.getPosition(),{x:20+distance,y:20},'equal axis distance starts the drag');
+  await s.controller.cancel();
+ }
+});
+test('explicit slop and legacy mode never query the native default',async()=>{
+ const s=await setup({position:{x:20,y:20}});s.context.panDistance=NaN;
+ await s.controller.updateConfig(new FxConfig({adsorb:false}));
+ assert.equal(s.context.panDistanceReads,0);
+ s.platform.handleTouch(touch(0,1,100,100,0));s.platform.handleTouch(touch(2,1,108,100,10));
+ assert.deepEqual(s.platform.getPosition(),{x:20,y:20});
+ s.platform.handleTouch(touch(2,1,109,100,20));assert.deepEqual(s.platform.getPosition(),{x:29,y:20});
+ await s.controller.updateConfig(new FxConfig({adsorb:false,gestureMode:'android-2',touchSlopVp:12}));
+ assert.equal(s.platform.getSnapshot().config.touchSlopVp,12);assert.equal(s.context.panDistanceReads,0);
+ await s.controller.cancel();
+});
+test('invalid native slop rejects configuration before replacing a live gesture',async()=>{
+ const s=await setup({gestureMode:'android-2',touchSlopVp:12,position:{x:20,y:20}});
+ s.platform.handleTouch(touch(0,1,100,100,0));
+ for(const distance of [0,-1,NaN,Infinity]) {
+  s.context.panDistance=distance;
+  await assert.rejects(s.platform.applyConfig(new FxConfig({gestureMode:'android-2'})),{code:'CAPABILITY_UNSUPPORTED'});
+  assert.equal(s.platform.getSnapshot().config.touchSlopVp,12);assert.equal(s.platform.hasPrimaryPointer(),true);
+ }
+ s.platform.handleTouch(touch(2,1,112,100,20));assert.deepEqual(s.platform.getPosition(),{x:32,y:20});
+ await s.controller.cancel();
+});
+
+test('Android takeover start and its same-timestamp update do not MOVE, but immediate UP releases',async()=>{
+ const releases=[];let drags=0;const s=await setup({gestureMode:'android-2',touchSlopVp:8},{onRelease:e=>{releases.push(e);return 'default';},onDrag:()=>drags++});
+ s.platform.handleTouch(touch(0,1,100,100,0),true);
+ const start={fingerList:[{id:1,globalX:108,globalY:100}],timestamp:10000000};
+ s.platform.handlePan(start,true);s.platform.handlePan(start);
+ s.platform.handleTouch(touch(1,1,150,100,20),true);
+ assert.equal(drags,0);assert.equal(releases.length,1);assert.equal(releases[0].dragged,false);assert.equal(releases[0].position.x,0);await s.controller.cancel();
+});
+test('Android independent MOVE with identical coordinates is processed and UP does not move',async()=>{
+ let drags=0;const releases=[];const s=await setup({gestureMode:'android-2',touchSlopVp:8},{onDrag:()=>drags++,onRelease:e=>{releases.push(e);return 'default';}});
+ s.platform.handleTouch(touch(0,1,100,100,0),true);
+ s.platform.handlePan({fingerList:[{id:1,globalX:108,globalY:100}],timestamp:10000000},true);
+ s.platform.handlePan({fingerList:[{id:1,globalX:108,globalY:100}],timestamp:11000000});
+ s.platform.handlePan({fingerList:[{id:1,globalX:108,globalY:100}],timestamp:12000000});
+ s.platform.handleTouch(touch(1,1,200,100,20),true);
+ assert.equal(drags,2);assert.equal(releases[0].position.x,8);assert.equal(s.platform.getPosition().x,8);await s.controller.cancel();
+});
+test('Android direct parent low-distance MOVE, click ordering and original release snapshot',async()=>{
+ let now=0;const order=[];const s=await setup({gestureMode:'android-2',touchSlopVp:8,adsorb:true,edgeAdsorb:'right'},
+ {onDown:()=>order.push('down'),onDrag:()=>order.push('drag'),onUp:e=>{order.push('up');assert.equal(e.position.x,2);assert.equal(s.platform.getPosition().x,250);},onClick:()=>order.push('click'),onTouch:e=>{if(e.phase==='up')order.push('raw');}}, {now:()=>now});
+ s.platform.handleTouch(touch(0,1,100,100,0));s.platform.handleTouch(touch(2,1,102,100,1));now=149;
+ s.platform.handleTouch(touch(1,1,300,100,1000));assert.deepEqual(order,['down','drag','up','click','raw']);await s.controller.cancel();
+});
+test('Android input CANCEL can release and classify a click; child CANCEL and hide cannot',async()=>{
+ let releases=0,clicks=0;const s=await setup({gestureMode:'android-2',touchSlopVp:8},{onRelease:()=>{releases++;return 'default';},onClick:()=>clicks++},{now:()=>100});
+ s.platform.handleTouch(touch(0,1,100,100,0),true);s.platform.handleTouch(touch(3,1,100,100,1),true);assert.equal(releases,0);
+ s.platform.handleTouch(touch(0,1,100,100,10));s.platform.handleTouch(touch(3,1,100,100,11));assert.equal(releases,1);assert.equal(clicks,1);
+ s.platform.handleTouch(touch(0,1,100,100,20));await s.controller.hide();assert.equal(releases,1);assert.equal(clicks,1);await s.controller.cancel();
+});
+test('Android parent secondary UP resets helper but later physical UP still releases; child secondary UP does not',async()=>{
+ let downs=0;const releases=[];const s=await setup({gestureMode:'android-2',touchSlopVp:8},{onDown:()=>downs++,onRelease:e=>{releases.push(e);return 'default';}});
+ s.platform.handleTouch(touch(0,1,100,100,0));s.platform.handleTouch(touch(0,2,105,100,1));
+ s.platform.handleTouch(touch(1,2,105,100,2));assert.equal(releases.length,1);assert.equal(s.platform.hasPrimaryPointer(),false);
+ s.platform.handleTouch(touch(2,1,150,100,3));assert.equal(s.platform.getPosition().x,0);
+ s.platform.handleTouch(touch(1,1,150,100,4));assert.equal(releases.length,2);assert.equal(downs,1);
+ s.platform.handleTouch(touch(0,1,100,100,10),true);s.platform.handleTouch(touch(0,2,105,100,11),true);
+ s.platform.handleTouch(touch(1,2,105,100,12),true);s.platform.handleTouch(touch(1,1,100,100,13),true);assert.equal(releases.length,2);await s.controller.cancel();
+});
+test('Android secondary motion cannot satisfy the selected action-pointer interception check',async()=>{
+ const s=await setup({gestureMode:'android-2',touchSlopVp:8});s.platform.handleTouch(touch(0,1,100,100,0),true);s.platform.handleTouch(touch(0,2,110,100,1),true);
+ assert.equal(s.platform.canStartPan({fingerList:[{id:2,globalX:300,globalY:100},{id:1,globalX:100,globalY:100}]}),false);
+ assert.equal(s.platform.canStartPan({fingerList:[{id:2,globalX:90,globalY:100},{id:1,globalX:120,globalY:100}]}),true);
+ await s.controller.cancel();
+});
+test('Android onDown hiding host prevents stale observer or later native pan actions',async()=>{
+ let observed=0;const s=await setup({gestureMode:'android-2',touchSlopVp:8},{onDown:()=>s.controller.hide(),onTouch:e=>{if(e.phase==='down')observed++;}});
+ s.platform.handleTouch(touch(0,1,100,100,0),true);s.platform.handlePan({fingerList:[{id:1,globalX:130,globalY:100}],timestamp:10000000},true);
+ assert.equal(observed,0);assert.equal(s.platform.hasPrimaryPointer(),false);await s.controller.cancel();
+});
+test('Android consumed release does not consume click cooldown',async()=>{
+ let consume=true;let clicks=0;const s=await setup({gestureMode:'android-2',touchSlopVp:8},{onRelease:()=>consume?'consumed':'default',onClick:()=>clicks++},{now:()=>100});
+ s.platform.handleTouch(touch(0,1,100,100,0));s.platform.handleTouch(touch(1,1,100,100,1));consume=false;
+ s.platform.handleTouch(touch(0,1,100,100,2));s.platform.handleTouch(touch(1,1,100,100,3));assert.equal(clicks,1);await s.controller.cancel();
+});
+test('Android new secondary DOWN after parent reset initializes once and MOVE still uses first live index',async()=>{
+ let downs=0,drags=0;const s=await setup({gestureMode:'android-2',touchSlopVp:8},{onDown:()=>downs++,onDrag:()=>drags++});
+ s.platform.handleTouch(touch(0,1,100,100,0));s.platform.handleTouch(touch(0,2,110,100,1));s.platform.handleTouch(touch(1,1,100,100,2));
+ s.platform.handleTouch({type:0,timestamp:3000000,changedTouches:[{id:3,x:10,y:10,windowX:110,windowY:100}]});assert.equal(downs,2);
+ s.platform.handleTouch({type:2,timestamp:4000000,changedTouches:[{id:3,windowX:140,windowY:100}],touches:[{id:2,windowX:120,windowY:100},{id:3,windowX:140,windowY:100}]});assert.equal(drags,0);await s.controller.cancel();
+});
+test('Android ClickOnly parent movement cancels candidate without moving or producing drag',async()=>{
+ let clicks=0,drags=0;const s=await setup({gestureMode:'android-2',touchSlopVp:8,displayMode:'click-only'},{onClick:()=>clicks++,onDrag:()=>drags++},{now:()=>0});
+ s.platform.handleTouch(touch(0,1,100,100,0));s.platform.handleTouch(touch(2,1,108,100,1));s.platform.handleTouch(touch(2,1,100,100,2));s.platform.handleTouch(touch(1,1,100,100,3));
+ assert.equal(clicks,0);assert.equal(drags,0);assert.equal(s.platform.getPosition().x,0);await s.controller.cancel();
 });

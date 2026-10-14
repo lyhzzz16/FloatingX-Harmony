@@ -4,7 +4,7 @@ import { FxPoint, FxInsets, FxGravity, FxEdgeAdsorb, FxDisplayMode, FxAnimationC
 export interface FxConfigOptions {
   boundaryMode?: FxBoundaryMode;
   gestureMode?: FxGestureMode;
-  /** Android scaledTouchSlop / Android density, in vp; required for ANDROID_2. */
+  /** Optional drag threshold in vp. ANDROID_2 resolves an omitted value from the host ArkUI Pan configuration. */
   touchSlopVp?: number;
   focusPolicy?: FxFocusPolicy;
   /** Keep mounted layout while drawing and input are disabled (Android INVISIBLE). */
@@ -89,7 +89,6 @@ export class FxConfig {
       requireNonnegative(this.touchSlopVp, 'touchSlopVp');
       if (this.touchSlopVp === 0) throw new FxError('INVALID_CONFIG', 'touchSlopVp must be positive');
     }
-    if (this.gestureMode === FxGestureMode.ANDROID_2 && this.touchSlopVp === undefined) throw new FxError('INVALID_CONFIG', 'ANDROID_2 requires explicit touchSlopVp from the Android reference device');
     if (this.boundaryMode !== FxBoundaryMode.CONTENT && this.boundaryMode !== FxBoundaryMode.ANDROID_2) throw new FxError('INVALID_CONFIG', 'Unknown boundaryMode');
     if (this.position !== undefined) {
       requireFinite(this.position.x, 'position.x'); requireFinite(this.position.y, 'position.y');

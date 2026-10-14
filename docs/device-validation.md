@@ -1,3 +1,17 @@
+# 0.1.1-yb.4 验证记录
+
+2026-10-14，SGT-AL10 / API26，独立 Demo；CMP 与接入应用未构建、未验收。
+
+- 280/280 核心测试（含 TypeScript 编译）通过，无跳过。保留 LEGACY 回归；新增手势顺序、时钟、指针、阈值与原生确认竞争测试，详见 [.4 审计](gesture-round3.md)。
+- 最终 HAR 与 signed/unsigned Demo HAP 构建通过；构建后恢复原 build-profile。存在原有最低 API12 相对 API20 手势接口、预发布版本号等工具警告，不将构建成功描述为零警告。
+- 已安装 .4 候选 Demo；测试者完成“等价验证”页轻点 A、从 A 起拖、再点 B，以及 System 不降级前台拖动、Home 后拖动、轻点关闭，反馈“正常”。
+- 15:05:38.822 helper DOWN，38.906 A click；40.892 新 helper DOWN，40.893 A DOWN，40.984 A CANCEL(type=3)，41.419 父 release，41.420 父 onUp；该起拖序列无迟到 A click；41.997 B click。
+- System 15:05:51.307 helper DOWN，51.735 父 onUp dragged=true；52.672 主窗口 onBackground；53.305 再次 helper DOWN，53.658 父 onUp dragged=true；55.344 系统窗口 Destroy success。
+- 此段 System 有50条原生矩形更新，首条51.570位置(324,848)px，末条53.668位置(8,1832)px，尺寸742×303px。与手指反馈共同支持前后台拖动及关闭，不是只看逻辑坐标。
+- 设备候选测试后，最终交付补充“CONSUMED 且调用方未发新命令时，仍完成最后已处理的原生 MOVE”分支；该分支由核心延迟确认回归覆盖并重新构建，未做该特殊分支的真机验收。默认路径未因此变更。
+
+本轮没有逐帧证明接管 MOVE 时机，也未覆盖真实多指、系统输入 CANCEL、库级长按、DisplayOnly、disallow-intercept、所有空白命中、旋转/分屏/平板。不得将以下旧版历史与本次结果合并为全部场景通过。
+
 # 0.1.1-yb.3 验证记录
 
 2026-10-13。修复 System 浮窗在 Home 下拖动中断。业务工程及 CMP 未构建、未验收。

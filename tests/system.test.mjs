@@ -325,3 +325,45 @@ test('safe area changes notify once and unsupported viewport keeps the existing 
  fail=true;assert.doesNotThrow(()=>hostChanged());assert.equal(changes,2);assert.throws(()=>native.getViewport(),{code:'CAPABILITY_UNSUPPORTED'});
  release();assert.equal(hostChanged,undefined);await native.destroy();
 });
+
+test('Android DisplayOnly retains native child input while layoutOnly disables the whole surface',async()=>{
+ const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();
+ await p.applyConfig(new FxConfig({gestureMode:'android-2',touchSlopVp:8,displayMode:'display-only'}));assert.equal(b.window.properties.touchable,true);
+ await p.applyConfig(new FxConfig({gestureMode:'android-2',touchSlopVp:8,displayMode:'display-only',layoutOnly:true}));assert.equal(b.window.properties.touchable,false);await p.destroy();
+});
+test('old System drag ack cannot replace last MOVE release position or a reentrant consumed move',async()=>{
+ const b=nativeBoundary();let control;let released;let destination;
+ const interactions={onRelease:e=>{released=e;destination=control.move(70,90,false);return 'consumed';}};
+ const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent(),interactions),systemGeometry());
+ const {FxController}=require('../work/core/core/FxController.js');control=new FxController(p,new FxConfig({adsorb:false,gestureMode:'android-2',touchSlopVp:8}));p.bindController(control);await control.show();
+ const one=deferred(),two=deferred(),enteredOne=deferred(),enteredTwo=deferred();const original=b.window.moveWindowTo;
+ b.window.moveWindowTo=async(x,y)=>{if(x===40){enteredOne.resolve();await one.promise;}if(x===80){enteredTwo.resolve();await two.promise;}await original.call(b.window,x,y);};
+ const event=(type,x)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:x,displayY:100,windowX:0,windowY:0}]});
+ b.view.handleTouch(event(TouchType.Down,100));b.view.handleTouch(event(TouchType.Move,120));await enteredOne.promise;
+ b.view.handleTouch(event(TouchType.Move,140));one.resolve();await enteredTwo.promise;
+ b.view.handleTouch(event(TouchType.Up,160));assert.equal(released.position.x,40);
+ two.resolve();await destination;assert.deepEqual(p.getPosition(),{x:70,y:90});await control.cancel();
+});
+test('Android system native coordinates truncate px while legacy retains rounding',async()=>{
+ for(const [gestureMode,expected] of [['android-2',20],['legacy',21]]) {
+  const f=new FakeWindowFactory();f.native.viewport.density=2;const p=new FxSystemPlatform(f,systemGeometry());await p.create();
+  await p.applyConfig(new FxConfig({gestureMode,touchSlopVp:8,adsorb:false}));await p.move({x:10.4,y:10.4},false);
+  assert.deepEqual(f.native.moves.at(-1),{x:expected,y:expected});await p.destroy();
+ }
+});
+test('System surface tap recognizer does not manufacture Android parent ownership',async()=>{
+ let releases=0;const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent(),{onRelease:()=>{releases++;return 'default';}}),systemGeometry());await p.create();
+ await p.applyConfig(new FxConfig({gestureMode:'android-2',touchSlopVp:8}));await p.show();
+ const event=type=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:100,displayY:100,windowX:0,windowY:0}]});
+ b.view.handleTouch(event(TouchType.Down),true);b.view.completeSurfaceTap();b.view.handleTouch(event(TouchType.Up),true);await Promise.resolve();assert.equal(releases,0);await p.destroy();
+});
+test('consumed Android release without a new command retains the last handled MOVE on the native window',async()=>{
+ const b=nativeBoundary();let released;const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent(),{onRelease:e=>{released=e;return 'consumed';}}),systemGeometry());
+ await p.create();await p.applyConfig(new FxConfig({gestureMode:'android-2',touchSlopVp:8,adsorb:false}));await p.show();
+ const gate=deferred(),entered=deferred();const original=b.window.moveWindowTo;let first=true;
+ b.window.moveWindowTo=async(x,y)=>{if(first){first=false;entered.resolve();await gate.promise;}await original.call(b.window,x,y);};
+ const event=(type,x)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:x,displayY:100,windowX:0,windowY:0}]});
+ b.view.handleTouch(event(TouchType.Down,100));b.view.handleTouch(event(TouchType.Move,120));await entered.promise;
+ b.view.handleTouch(event(TouchType.Move,140));b.view.handleTouch(event(TouchType.Up,190));assert.equal(released.position.x,40);
+ gate.resolve();await p.flushGeometry();assert.equal(p.getPosition().x,40);await p.destroy();
+});

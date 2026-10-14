@@ -33,7 +33,7 @@ export struct AppDemo {
       () => { if(this.controller!==undefined) this.run(this.controller.cancel()); },() => { this.message='内按钮已点击'; }),{width:240,height:100});
     // README app snippet. WindowHost is created after WindowStage.loadContent.
     const controller=FloatingX.installApp({tag:'app-demo',host:host,content:content,
-      config:new FxConfig({boundaryMode:FxBoundaryMode.ANDROID_2,gestureMode:FxGestureMode.ANDROID_2,touchSlopVp:8,focusPolicy:FxFocusPolicy.NON_FOCUSABLE,halfHide:true,position:{x:20,y:120},adsorb:false}),
+      config:new FxConfig({boundaryMode:FxBoundaryMode.ANDROID_2,gestureMode:FxGestureMode.ANDROID_2,focusPolicy:FxFocusPolicy.NON_FOCUSABLE,halfHide:true,position:{x:20,y:120},adsorb:false}),
       pagePolicy:{mode:'blacklist',names:['Blocked']},
       storage:{namespace:'demo',storage:new FxMemoryStorage()},
       interactions:{

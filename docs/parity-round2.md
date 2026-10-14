@@ -4,6 +4,8 @@
 
 本轮以 Android FloatingX 2.3.7 的 `a4b9dbfc1649accde832d2f70dd90d54bf5fac9a` 为行为依据，Harmony 从 `829dfb8a68f30ab0cdd441b9d8256dff62ea9b26` 继续。版本是组件接入预览版，不能解释为所有设备或嵌入式 UI 框架已通过验收。真实 CMP 示例按本轮范围暂缓；公开仓库没有业务代码、私有 UI bridge、私有 HAR 或应用状态规则。
 
+.4 的阈值默认值、父/子终止及回调顺序以 [新手势审计](gesture-round3.md) 和 [当前 API 契约](android-parity.md) 为准。下文显式阈值要求与 S/T/B/D 记录为 .2/.3 历史，不能作为 .4 当前行为说明。
+
 ## 差异与 Android 证据
 
 下列链接固定到 Android commit，避免跟随上游变化。S 表示源码对照，T 表示核心回归，B 表示 ArkTS HAR/HAP 构建，D 表示本轮单台真机观察。

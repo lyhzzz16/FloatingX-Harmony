@@ -54,7 +54,8 @@ export class FxAppPlatform implements FxPlatform {
   }
   layoutContent(size: FxSize): void { if(!this.destroyed && this.host.isValid()) this.engine.layoutContent(size); }
   handleTouch(event: TouchEvent, observeOnly: boolean = false): void { if(this.isHostVisible() && this.isReadyToShow()) this.engine.handleTouch(event,observeOnly); }
-  handlePan(event: GestureEvent): void {this.engine.handlePan(event);}
+  canStartPan(event: BaseGestureEvent): boolean {return this.engine.canStartPan(event);}
+  handlePan(event: GestureEvent, starting: boolean = false): void {this.engine.handlePan(event,starting);}
   completeSurfaceTap(): void {this.engine.completeSurfaceTap();}
   cancelAnimations(): void { this.engine.cancelAnimations(); }
   async create(): Promise<void> {

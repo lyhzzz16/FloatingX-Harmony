@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const ts=require('typescript');
+let activeScopeContext;
 /** Execute production non-component .ets classes with only the SDK native node boundary substituted.
  * This is host behavioral coverage, not ArkTS or device acceptance. Genuine SDK build is separate. */
 export function loadScopePlatform() {
@@ -13,11 +14,16 @@ export function loadScopePlatform() {
  fs.writeFileSync(destination,ts.transpileModule(fs.readFileSync(source,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText);
  globalThis.Curve={Ease:'ease',Linear:'linear',EaseIn:'in',EaseOut:'out',EaseInOut:'inout'};
  globalThis.TouchType={Down:0,Up:1,Move:2,Cancel:3};
+ globalThis.PanGestureOptions=class {
+  getDistance(){if(!activeScopeContext)throw Error('Pan distance read outside UIContext');activeScopeContext.panDistanceReads++;return activeScopeContext.panDistance;}
+ };
  const Module=require('node:module');const original=Module._load;
  Module._load=function(name,...args){if(name==='@ohos.deviceInfo')return {default:{sdkApiVersion:26}};return original.call(this,name,...args);};
  try{return require(destination).FxScopePlatform;}finally{Module._load=original;}
 }
 export class ScopeContext {
+ panDistance=6;panDistanceReads=0;
+ runScopedTask(callback){const previous=activeScopeContext;activeScopeContext=this;try{callback();}finally{activeScopeContext=previous;}}
  vp2px(value){return value;}
  px2vp(value){return value;}
  finishes=[];

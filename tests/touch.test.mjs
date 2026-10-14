@@ -41,12 +41,27 @@ test('ClickOnly cancels displaced taps without moving; DisplayOnly ignores every
  assert.equal(d.up(p(1,0,0,600)).kind,'none'); assert.equal(d.cancel().kind,'none');
 });
 
-test('Android uses axis >= slop, not Euclidean, and releases at Android duration boundaries',()=>{
- const {FxGestureMode}=require('../work/core/core/FxTypes.js');
- const t=new FxTouch('normal',8,300,500,FxGestureMode.ANDROID_2);
- t.down(p(1,0,0,0));assert.equal(t.move(p(1,6,6,20)).kind,'none');assert.equal(t.move(p(1,8,6,30)).kind,'drag');assert.equal(t.up(p(1,8,6,40)).kind,'end');
+// Android interceptTouchEvent and touchEvent have distinct MOVE contracts.
+test('Android interception is axis >= while a delivered parent MOVE is unconditional',()=>{
+ const t=new FxTouch('normal',8,300,500,'android-2');t.down(p(1,0,0,0));
+ assert.equal(t.shouldIntercept(p(1,6,6,20)),false);assert.equal(t.shouldIntercept(p(1,8,0,30)),true);
+ assert.deepEqual(t.move(p(1,2,0,40)),{kind:'drag',position:{x:2,y:0}});
+ assert.deepEqual(t.move(p(1,0,0,50)),{kind:'drag',position:{x:0,y:0}});
+});
+test('Android terminal uses processing clock, not packet timestamps',()=>{
  for(const [duration,expected] of [[149,'click'],[150,'end'],[499,'end'],[500,'longPress']]) {
-  const h=new FxTouch('normal',8,0,500,FxGestureMode.ANDROID_2);h.down(p(1,0,0,0));assert.equal(h.move(p(1,0,0,500)).kind,'none');assert.equal(h.up(p(1,0,0,duration)).kind,expected);
+  let now=0;const t=new FxTouch('normal',8,0,500,'android-2',{now:()=>now});t.down(p(1,0,0,5000));
+  now=duration;assert.equal(t.up(p(1,500,500,5001)).kind,expected);
+  assert.deepEqual(t.up(p(1,500,500,9000)),{kind:'end',position:{x:0,y:0}});
  }
- t.down(p(1,0,0,1000));assert.equal(t.move(p(1,0,0,1600)).kind,'none');assert.equal(t.move(p(1,9,0,1700)).kind,'drag');assert.equal(t.up(p(1,9,0,1800)).kind,'end');
+});
+test('Android click candidacy is permanent per gesture and needs an actual callback',()=>{
+ let now=0;const t=new FxTouch('normal',8,300,500,'android-2',{now:()=>now});
+ t.down(p(1,0,0,0));t.move(p(1,8,0,0));t.move(p(1,0,0,0));assert.equal(t.up(p(1,0,0,0)).kind,'end');
+ t.down(p(1,0,0,0),undefined,false);now=600;assert.equal(t.up(p(1,0,0,0)).kind,'end');
+ t.down(p(1,0,0,0));assert.equal(t.up(p(1,0,0,0)).kind,'click');
+ // A suppressed or unhandled click does not start cooldown.
+ t.down(p(1,0,0,0));assert.equal(t.up(p(1,0,0,0)).kind,'click');t.commitClick();
+ now=700;t.down(p(1,0,0,0));assert.equal(t.up(p(1,0,0,0)).kind,'end');
+ now=900;t.down(p(1,0,0,0));assert.equal(t.up(p(1,0,0,0)).kind,'click');
 });

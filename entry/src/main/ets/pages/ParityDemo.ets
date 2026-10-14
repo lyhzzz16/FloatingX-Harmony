@@ -26,12 +26,14 @@ export struct ParityDemo {
   @State private expanded: boolean = false;
   private owner: DemoPageOwner = new DemoPageOwner();
   private releaseLayout?: () => void;
-  private config: FxConfig = new FxConfig({boundaryMode:FxBoundaryMode.ANDROID_2,gestureMode:FxGestureMode.ANDROID_2,touchSlopVp:8,focusPolicy:FxFocusPolicy.NON_FOCUSABLE,
+  private config: FxConfig = new FxConfig({boundaryMode:FxBoundaryMode.ANDROID_2,gestureMode:FxGestureMode.ANDROID_2,focusPolicy:FxFocusPolicy.NON_FOCUSABLE,
     halfHide:true,halfHideRatio:0.5,rebound:true,adsorb:false,position:{x:30,y:80}});
   private control: FxControl<ParityParams> = FloatingX.createScope({
     config:this.config,
     content:new FxContent(wrapBuilder(parityContent),new ParityParams(160,'整窗拖动 / 原生按钮',label => this.record(label)),{width:160,height:100}),
     interactions:{
+      onDown:() => this.record('helper down'),
+      onUp:() => this.record('parent up'),
       onTouch:(event: FxTouchSnapshot) => {this.message=event.phase+' delta='+event.delta.x.toFixed(1)+','+event.delta.y.toFixed(1)+' x='+event.position.x.toFixed(1);},
       onRelease:() => {this.record('parent release');return this.consumed?FxReleaseDecision.CONSUMED:FxReleaseDecision.DEFAULT;},
       onClick:() => this.record('parent click'),onLongPress:() => this.record('parent long release')

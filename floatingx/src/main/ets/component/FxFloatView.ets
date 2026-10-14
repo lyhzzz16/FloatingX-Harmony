@@ -8,7 +8,8 @@ export interface FxFloatViewAdapter {
   getSnapshot(): FxScopeSnapshot;
   layoutContent(size: FxSize): void;
   handleTouch(event: TouchEvent, observeOnly?: boolean): void;
-  handlePan(event: GestureEvent): void;
+  canStartPan(event: BaseGestureEvent): boolean;
+  handlePan(event: GestureEvent, starting?: boolean): void;
   completeSurfaceTap(): void;
 }
 let surfaceSequence: number = 0;
@@ -18,10 +19,11 @@ export struct FxFloatView {
   @Prop revision: number = 0;
   private claimedAxis: string = '';
   private surfaceId: string = 'FloatingXSurface_'+(++surfaceSequence).toString();
-  private judge(current: GestureRecognizer, others: GestureRecognizer[], touches?: TouchRecognizer[]): GestureJudgeResult {
+  private judge(event: BaseGestureEvent, current: GestureRecognizer, others: GestureRecognizer[], touches?: TouchRecognizer[]): GestureJudgeResult {
     if(deviceInfo.sdkApiVersion<20)return GestureJudgeResult.REJECT;
     if(current.getTag()!==this.surfaceId+'x' && current.getTag()!==this.surfaceId+'y')return GestureJudgeResult.CONTINUE;
     if(this.currentSnapshot(this.revision).config.displayMode!==FxDisplayMode.Normal)return GestureJudgeResult.REJECT;
+    if(!this.platform.canStartPan(event))return GestureJudgeResult.REJECT;
     if(this.claimedAxis!=='' && this.claimedAxis!==current.getTag())return GestureJudgeResult.REJECT;
     this.claimedAxis=current.getTag();
     // Only a successful axis recognizer takes ownership. Native children receive CANCEL,
@@ -56,9 +58,9 @@ export struct FxFloatView {
               .height(this.currentSnapshot(this.revision).projection.visibleSize.height)
               .parallelGesture(PanGesture({direction:PanDirection.Horizontal,distance:this.currentSnapshot(this.revision).config.touchSlopVp!})
                 .tag(this.surfaceId+'x')
-                .onActionStart((event: GestureEvent) => this.platform.handlePan(event))
+                .onActionStart((event: GestureEvent) => this.platform.handlePan(event,true))
                 .onActionUpdate((event: GestureEvent) => this.platform.handlePan(event)))
-              .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, current: GestureRecognizer, others: GestureRecognizer[], touches?: TouchRecognizer[]) => this.judge(current,others,touches))
+              .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, current: GestureRecognizer, others: GestureRecognizer[], touches?: TouchRecognizer[]) => this.judge(_event,current,others,touches))
           }
             .id(this.surfaceId)
             .width(this.currentSnapshot(this.revision).projection.visibleSize.width)
@@ -71,9 +73,9 @@ export struct FxFloatView {
             .gesture(TapGesture().onAction(() => this.platform.completeSurfaceTap()))
             .parallelGesture(PanGesture({direction:PanDirection.Vertical,distance:this.currentSnapshot(this.revision).config.touchSlopVp!})
               .tag(this.surfaceId+'y')
-              .onActionStart((event: GestureEvent) => this.platform.handlePan(event))
+              .onActionStart((event: GestureEvent) => this.platform.handlePan(event,true))
               .onActionUpdate((event: GestureEvent) => this.platform.handlePan(event)))
-            .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, current: GestureRecognizer, others: GestureRecognizer[], touches?: TouchRecognizer[]) => this.judge(current,others,touches))
+            .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, current: GestureRecognizer, others: GestureRecognizer[], touches?: TouchRecognizer[]) => this.judge(_event,current,others,touches))
         } else {
           this.content()
         // A dedicated drag surface consumes clicks only inside the configured region.
@@ -91,8 +93,8 @@ export struct FxFloatView {
       .height(this.currentSnapshot(this.revision).projection.visibleSize.height)
       .position(this.currentSnapshot(this.revision).projection.position)
       .clip(true)
-      // None skips this node only; disabled state also suppresses native child buttons.
-      .enabled(!this.currentSnapshot(this.revision).config.layoutOnly && this.currentSnapshot(this.revision).config.displayMode !== FxDisplayMode.DisplayOnly)
+      // Android DisplayOnly skips the helper while child controls retain native input.
+      .enabled(!this.currentSnapshot(this.revision).config.layoutOnly && (this.currentSnapshot(this.revision).config.gestureMode===FxGestureMode.ANDROID_2 || this.currentSnapshot(this.revision).config.displayMode !== FxDisplayMode.DisplayOnly))
       .opacity(this.currentSnapshot(this.revision).opacity)
       .visibility(this.currentSnapshot(this.revision).visible && !this.currentSnapshot(this.revision).config.layoutOnly ? Visibility.Visible:Visibility.Hidden)
       .hitTestBehavior(this.currentSnapshot(this.revision).config.displayMode === FxDisplayMode.DisplayOnly ? HitTestMode.None:HitTestMode.Transparent)

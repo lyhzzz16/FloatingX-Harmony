@@ -62,7 +62,8 @@ export class FxSystemPageView implements FxSystemView {
   }
   layoutContent(size: FxSize): void {this.engine.layoutContent(size);}
   handleTouch(event: TouchEvent, observeOnly: boolean = false): void {if(event.type===TouchType.Down && !this.engine.hasPrimaryPointer())this.owner.cancelAnimations();this.engine.handleTouch(event,observeOnly);}
-  handlePan(event: GestureEvent): void {this.engine.handlePan(event);}
+  canStartPan(event: BaseGestureEvent): boolean {return this.engine.canStartPan(event);}
+  handlePan(event: GestureEvent, starting: boolean = false): void {this.engine.handlePan(event,starting);}
   completeSurfaceTap(): void {this.engine.completeSurfaceTap();}
   async applyConfig(config: FxConfig): Promise<void> {this.engine.layoutHost(this.owner.getGeometry().viewport.size,this.owner.getGeometry().viewport.insets);await this.engine.applyConfig(config);this.adoptPosition(this.owner.getPosition());}
   show(): Promise<void> {return this.engine.show();} hide(): Promise<void> {return this.engine.hide();}

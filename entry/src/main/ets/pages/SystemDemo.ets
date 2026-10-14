@@ -28,8 +28,10 @@ export struct SystemDemo {
     const control=FloatingX.installSystem({tag:'system-demo',
       context:this.getUIContext().getHostContext() as common.UIAbilityContext,
       content:new FxContent(wrapBuilder(systemContent),new SystemContentParams(() => {if(this.control!==undefined)this.run(this.control.cancel());}),{width:220,height:90}),
-      size:{width:220,height:90},config:new FxConfig({boundaryMode:FxBoundaryMode.ANDROID_2,gestureMode:FxGestureMode.ANDROID_2,touchSlopVp:8,focusPolicy:FxFocusPolicy.NON_FOCUSABLE,halfHide:true,position:{x:20,y:100},adsorb:false}),
+      size:{width:220,height:90},config:new FxConfig({boundaryMode:FxBoundaryMode.ANDROID_2,gestureMode:FxGestureMode.ANDROID_2,focusPolicy:FxFocusPolicy.NON_FOCUSABLE,halfHide:true,position:{x:20,y:100},adsorb:false}),
       fallback:fallback,interactions:{
+        onDown:() => console.info('FxSystem helper down'),
+        onUp:(event) => console.info('FxSystem parent up dragged='+event.dragged+' x='+event.position.x+' y='+event.position.y),
         onTouch:(event) => {if(this.pageOwner.isActive())this.message=event.phase+' delta='+event.delta.x.toFixed(1)+','+event.delta.y.toFixed(1);},
         onRelease:() => this.consumed?FxReleaseDecision.CONSUMED:FxReleaseDecision.DEFAULT},
       events:(event) => {if(this.pageOwner.isActive())this.message='actualScope='+event.actualScope+(event.error===undefined?'':'; '+event.error.code+': '+event.error.message);}});

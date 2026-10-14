@@ -4,14 +4,14 @@
 
 - Android：FloatingX **2.3.7**，tag `2.3.7`，commit `a4b9dbfc1649accde832d2f70dd90d54bf5fac9a`。
 - Harmony：上游与本 fork 的 `731e834245492c8b43256de861208ed2abfe1c0c`。
-- 本预览版：`0.1.1-yb.3`。不宣称所有 Android API、默认值、窗口类型和设备表现均已完全相同。
-- 本轮扩展通用触摸仲裁、初始化/尺寸变化、安全区、窗口生命周期、焦点与隐藏测量；逐项证据与 C01～C25 结论见 [本轮对齐记录](parity-round2.md)。不包含业务状态、倒计时、导航、录音或窗口切换策略。
+- 本预览版：`0.1.1-yb.4`。不宣称所有 Android API、默认值、窗口类型和设备表现均已完全相同。
+- 本轮修正父/子手势、释放回调和系统窗口异步移动；见 [.4 手势审计](gesture-round3.md)。初始化/尺寸变化、安全区、窗口生命周期、焦点与隐藏测量的历史 C01～C25 记录见 [.2/.3 对齐记录](parity-round2.md)。不包含业务状态、倒计时、导航、录音或窗口切换策略。
 
 ## 逐项证据与取舍
 
 | 变更 | Android 源码依据 | Harmony 映射与边界 |
 | --- | --- | --- |
-| Down/Move/Up/Cancel 快照 | [IFxTouchListener](https://github.com/Petterpx/FloatingX/blob/a4b9dbfc1649accde832d2f70dd90d54bf5fac9a/floatingx/src/main/java/com/petterp/floatingx/listener/IFxTouchListener.kt)、[FxViewTouchHelper](https://github.com/Petterpx/FloatingX/blob/a4b9dbfc1649accde832d2f70dd90d54bf5fac9a/floatingx/src/main/java/com/petterp/floatingx/view/helper/FxViewTouchHelper.kt)：onDown/onDragIng/onUp，MotionEvent 区分动作，记录主触点及 raw 坐标 | `interactions.onTouch`。补充明确的取消原因。仅主触点结束手势；静止不推断 Up；生命周期取消只通知，不触发释放策略 |
+| Down/Move/Up/Cancel 快照 | [IFxTouchListener](https://github.com/Petterpx/FloatingX/blob/a4b9dbfc1649accde832d2f70dd90d54bf5fac9a/floatingx/src/main/java/com/petterp/floatingx/listener/IFxTouchListener.kt)、[FxViewTouchHelper](https://github.com/Petterpx/FloatingX/blob/a4b9dbfc1649accde832d2f70dd90d54bf5fac9a/floatingx/src/main/java/com/petterp/floatingx/view/helper/FxViewTouchHelper.kt)：onDown/onDragIng/onUp，MotionEvent 区分动作，记录主触点及 raw 坐标 | `interactions.onTouch`。补充明确的取消原因。ANDROID_2 区分父/子归属；父收到 POINTER_UP 也终止 helper，子次指抬起不触发父释放；静止不推断 Up；生命周期取消只通知，不触发释放策略 |
 | 释放前接管 | [getManagerView](https://github.com/Petterpx/FloatingX/blob/a4b9dbfc1649accde832d2f70dd90d54bf5fac9a/floatingx/src/main/java/com/petterp/floatingx/imp/FxBasisControlImp.kt) 暴露原生容器；[FxBasicContainerView.onTouchEvent](https://github.com/Petterpx/FloatingX/blob/a4b9dbfc1649accde832d2f70dd90d54bf5fac9a/floatingx/src/main/java/com/petterp/floatingx/view/FxBasicContainerView.kt) 才进入库手势处理；[AOSP View](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-15.0.0_r1/core/java/android/view/View.java#L16429-L16448) 中原生 OnTouchListener 返回 true 时不再调用 onTouchEvent | `onRelease` 返回 DEFAULT/CONSUMED，是 ArkUI 对原生容器事件接管能力的适配，不是假称 Android 有同名接口。只接管本次释放的默认吸附/回弹/存储/浮窗点击，不撤销已发生的拖动或长按 |
 | Android 拖动边界 | [safeX/safeY 与 updateMoveBoundary](https://github.com/Petterpx/FloatingX/blob/a4b9dbfc1649accde832d2f70dd90d54bf5fac9a/floatingx/src/main/java/com/petterp/floatingx/view/helper/FxViewLocationHelper.kt)、[setEnableScrollOutsideScreen](https://github.com/Petterpx/FloatingX/blob/a4b9dbfc1649accde832d2f70dd90d54bf5fac9a/floatingx/src/main/java/com/petterp/floatingx/assist/helper/FxBasisHelper.kt) | 显式 `boundaryMode: ANDROID_2`。保持原默认 CONTENT；不增加无证据的四边无限出屏模式 |
 | 关闭吸附后释放不强制归位 | [touchCancel](https://github.com/Petterpx/FloatingX/blob/a4b9dbfc1649accde832d2f70dd90d54bf5fac9a/floatingx/src/main/java/com/petterp/floatingx/view/helper/FxViewTouchHelper.kt)：仅 enableEdgeAdsorption 为真时调用 moveToEdge | ANDROID_2 下 `adsorb:false` 保留拖动结束位置；正常未消费释放仍可保存位置 |
@@ -22,20 +22,25 @@
 
 ## 触摸、释放与重入
 
-公开 `FxInteractions` 增加：
+`FxInteractions` 的 `onDown` / `onUp` 在 ANDROID_2 提供 helper 初始化和默认父终止通知。`onTouch` 仅观察，`onRelease` 是同步决策扩展：
 
 ```ts
+onDown?: (event: FxTouchSnapshot) => void | Promise<void>;
 onTouch?: (event: FxTouchSnapshot) => void | Promise<void>;
 onRelease?: (event: FxTouchSnapshot) => FxReleaseDecision;
+onUp?: (event: FxTouchSnapshot) => void | Promise<void>;
 ```
 
-- 处理主触点移动后发送 MOVE。UP：收集最终触点位置 → 复位本轮手势 → `onTouch(UP)` → 同步 `onRelease` → 未消费时默认点击/拖动结束处理。
-- 系统 CANCEL：`onTouch(CANCEL)` → `onRelease`；默认不点击，已拖动时可执行原有结束处理。取消快照使用最后已知主触点位置。
-- 隐藏/销毁/宿主改变/布局变化/配置改变/主动移动打断手势时，仅发送带原因的 CANCEL，不再执行释放决策；避免中断回调反过来复活旧手势。
-- CONSUMED 跳过本轮默认吸附、回弹、保存和浮窗点击，取消旧待执行移动。调用方可异步更新内容、等待布局后主动移动；调用方须处理 Promise 失败。
-- 决策必须同步返回枚举，不能返回 Promise。异常会上报回调失败并使用默认路径；观察回调的异步任务不阻塞手势。
-- 回调可调用控制句柄；重入移动/隐藏/取消会使旧释放后续失效。库不等待回调中启动的应用任务。
-- `delta` 是原始触点累计位移；`position` 是拖动边界处理后的逻辑浮窗坐标、尚未执行释放后的吸边。两者不是同一个坐标。LEGACY 保留旧 dragArea；ANDROID_2 使用原生子内容仲裁，子点击优先，父级取得拖动后才执行父释放。自定义内容主动停止 raw 事件传播、已成功子手势及嵌入式渲染框架仍需单独验收。
+- ANDROID_2：helper 初始化 → `onDown` → DOWN 观察；父 MOVE 更新后通知拖动；终止时 `onRelease` 决策 → 默认结算启动 → `onUp` → 库点击/长按 → 终止观察。`onUp.position` 为最后处理的 MOVE，不采用 UP 坐标。异步窗口结算不保证在 `onUp` 前呈现到屏幕。
+- `onTouch` 可观察到子序列 UP，它不代表父 `onUp`。子序列终止没有父释放；原生表面 Tap 的 App/Scope 适配及真实归属边界见 [.4 审计](gesture-round3.md)。System 不额外合成空白 Tap 父处理。
+- 父收到真实输入 CANCEL 或 POINTER_UP 进入终止；如仍有点击候选，CANCEL 也按 Android 处理时钟分类。子输入 CANCEL 仅观察。父 helper 因 POINTER_UP 复位后，随后实际收到的 UP 仍可再次通知父终止，不能当成重复事件丢弃。
+- 隐藏/销毁/宿主改变/配置改变/主动移动等生命周期打断，仅发送带原因的 CANCEL，不执行用户释放/点击/吸附。内容测量调整按现有 ANDROID_2 resize 契约保留手势。
+- CONSUMED 跳过本次默认吸附、回弹、保存、`onUp` 和浮窗点击；它不能撤销已经处理的 MOVE。System 会完成最后已处理位置，旧确认不会覆盖调用方在回调中新发起的移动。调用方自行处理异步 Promise 失败。
+- 决策必须同步返回枚举；异常报告回调失败并走默认路径。异步观察不阻塞手势。回调重入隐藏/移动/取消时，旧流程代际失效，不继续执行旧默认行为。
+- LEGACY 保留原顺序与行为：终止观察 → 释放决策 → 默认点击/拖动结束；仅匹配主触点 UP 结束，输入 CANCEL 不分类点击。新增 `onDown` / `onUp` 不改变 LEGACY 路径。
+- `delta` 是原始触点累计位移；`position` 是边界处理后的逻辑浮窗坐标，尚未执行释放后的吸边。System 窗口确认几何与待提交逻辑位置分别维护。
+
+`ANDROID_2` 省略 `touchSlopVp` 时从所属 UIContext 获取 Pan 默认距离；显式正有限值优先。这是平台参数适配，不能保证不同 OS 数值相同。DisplayOnly 只禁用库 helper，不禁用原生子内容；隐藏准备请使用 layoutOnly。完整原生分发、长按、任意内容、真实多指仍有待验证或待实现的边界，见 [.4 审计](gesture-round3.md)。
 
 ## Android 边界模式
 

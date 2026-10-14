@@ -1,6 +1,6 @@
 # FloatingX-Harmony
 
-> 本 fork 提供 `0.1.1-yb.3` Android 2.3.7 对齐预览版：见 [源码证据与 API 契约](docs/android-parity.md)、[本轮差异与接入配置](docs/parity-round2.md) 和 [HAR 接入、发布及验收](docs/fork-release-validation.md)。原默认边界/手势保留，新模式须显式开启。下方上游文档与 GIF 不代表本预览版已通过真机验收。
+> 本 fork 提供 `0.1.1-yb.4` Android 2.3.7 对齐预览版：见 [源码证据与 API 契约](docs/android-parity.md)、[本轮差异与接入配置](docs/gesture-round3.md) 和 [HAR 接入、发布及验收](docs/fork-release-validation.md)。原默认边界/手势保留，新模式须显式开启。下方上游文档与 GIF 不代表本预览版已通过真机验收。
 
 **FloatingX-Harmony** 是原生 ArkTS / ArkUI 悬浮窗库，提供局部浮窗、应用内浮窗和受平台权限约束的系统浮窗。以一个 HAR 接入，最低兼容 **HarmonyOS 5.0.0（API 12）**。
 
