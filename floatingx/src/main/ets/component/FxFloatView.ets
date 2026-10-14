@@ -22,13 +22,17 @@ export struct FxFloatView {
   // Snapshot is adapter-owned, so every ArkUI expression must observe its revision.
   private currentSnapshot(_revision: number): FxScopeSnapshot { return this.platform.getSnapshot(); }
   private hitTestMode(_revision: number): HitTestMode {
-    const config=this.currentSnapshot(_revision).config;
+    const snapshot=this.currentSnapshot(_revision);
+    if(!snapshot.visible || snapshot.config.layoutOnly)return HitTestMode.None;
+    const config=snapshot.config;
     if(config.displayMode===FxDisplayMode.DisplayOnly)return HitTestMode.None;
     if(config.gestureMode!==FxGestureMode.ANDROID_2)return HitTestMode.Transparent;
     // ANDROID_2 activation rejects API <20; keep the enum access guarded during rendering too.
     return deviceInfo.sdkApiVersion>=20?HitTestMode.BLOCK_HIERARCHY:HitTestMode.Default;
   }
   private judge(event: BaseGestureEvent, current: GestureRecognizer, others: GestureRecognizer[], touches?: TouchRecognizer[]): GestureJudgeResult {
+    const snapshot=this.currentSnapshot(this.revision);
+    if(!snapshot.visible || snapshot.config.layoutOnly)return GestureJudgeResult.REJECT;
     if(deviceInfo.sdkApiVersion<20)return GestureJudgeResult.REJECT;
     if(current.getTag()===this.surfaceId+'tap')return this.currentSnapshot(this.revision).config.contentOwnsTap?GestureJudgeResult.REJECT:GestureJudgeResult.CONTINUE;
     if(current.getTag()!==this.surfaceId+'x' && current.getTag()!==this.surfaceId+'y')return GestureJudgeResult.CONTINUE;
@@ -103,8 +107,9 @@ export struct FxFloatView {
       .clip(true)
       // Android DisplayOnly skips the helper while child controls retain native input.
       .enabled(!this.currentSnapshot(this.revision).config.layoutOnly && (this.currentSnapshot(this.revision).config.gestureMode===FxGestureMode.ANDROID_2 || this.currentSnapshot(this.revision).config.displayMode !== FxDisplayMode.DisplayOnly))
-      .opacity(this.currentSnapshot(this.revision).opacity)
-      .visibility(this.currentSnapshot(this.revision).visible && !this.currentSnapshot(this.revision).config.layoutOnly ? Visibility.Visible:Visibility.Hidden)
+      .opacity(this.currentSnapshot(this.revision).config.layoutOnly ? 0 : this.currentSnapshot(this.revision).opacity)
+      .visibility(this.currentSnapshot(this.revision).visible ? Visibility.Visible:Visibility.Hidden)
+      .accessibilityLevel(this.currentSnapshot(this.revision).config.layoutOnly ? 'no-hide-descendants' : 'auto')
       .hitTestBehavior(this.hitTestMode(this.revision))
     }
   }

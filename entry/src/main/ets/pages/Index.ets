@@ -1,3 +1,4 @@
+import { RenderLayoutDemo } from './RenderLayoutDemo';
 import { InputDemo } from './InputDemo';
 import { ParityDemo } from './ParityDemo';
 import { MultipleDemo } from './MultipleDemo';
@@ -14,6 +15,7 @@ struct Index {
   }
   build() {
     Tabs() {
+      TabContent() { RenderLayoutDemo() }.tabBar('绘制布局')
       TabContent() { InputDemo() }.tabBar('输入回归')
       TabContent() { ParityDemo() }.tabBar('等价验证')
       TabContent() { ScopeDemo() }.tabBar('局部')

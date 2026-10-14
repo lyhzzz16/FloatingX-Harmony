@@ -20,6 +20,7 @@ import hilog from '@ohos.hilog';
 
 import { FxWindowHost } from 'floatingx';
 import { DemoOwner } from './DemoOwner';
+import { RenderProbeBackground } from './RenderProbeBackground';
 
 export default class EntryAbility extends UIAbility {
   private host?: FxWindowHost;
@@ -38,7 +39,8 @@ export default class EntryAbility extends UIAbility {
       }).catch((error: Error) => { hilog.error(0xFF00,'EntryAbility','Host creation: %{public}s',error.message); });
     });
   }
-  onDestroy(): void {this.systemOwner.cancel().catch((error: Error) => {hilog.error(0xFF00,'EntryAbility','System cleanup: %{public}s',error.message);});}
+  onBackground(): void {RenderProbeBackground.run();}
+  onDestroy(): void {RenderProbeBackground.pending=undefined;this.systemOwner.cancel().catch((error: Error) => {hilog.error(0xFF00,'EntryAbility','System cleanup: %{public}s',error.message);});}
   onWindowStageDestroy(): void {
     this.systemOwner.cancel().catch((error: Error) => {hilog.error(0xFF00,'EntryAbility','System owner cleanup: %{public}s',error.message);});
     this.stageEpoch++; const host=this.host; this.host=undefined;

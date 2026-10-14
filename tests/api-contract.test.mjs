@@ -151,3 +151,17 @@ test('public layoutOnly prepares invisible measured content, moves, then reveals
  const frame=frames.at(-1);const pending=control.updateContentAndWaitForLayout({label:'prepared'});await Promise.resolve();completeLayout(frame);await pending;
  await control.move(90,100);config.layoutOnly=false;await control.updateConfig(config);assert.equal(control.isShow(),true);assert.equal(control.getState(),'visible');assert.equal(frames.at(-1),frame);assert.equal(control.getX(),90);await control.cancel();
 });
+
+test('prepared SHOW remains a lifecycle event and revealing does not synthesize another SHOW',async()=>{
+ const events=[];const source=content();const config=new FxConfig({layoutOnly:true,adsorb:false});
+ const control=FloatingX.createScope({content:source,config,events:event=>events.push({type:event.type,state:control.getState()})});
+ const platform=require('../work/core/scope/FxHostBinding.js').scopeHostBinding(control).platform;
+ platform.mountHost(new ScopeContext(),contentSource(source));platform.layoutHost({width:300,height:500});
+ await control.show();assert.equal(control.isShow(),false);
+ assert.deepEqual(events.filter(e=>e.type==='show'),[{type:'show',state:'prepared'}]);
+ config.layoutOnly=false;await control.updateConfig(config);assert.equal(control.isShow(),true);
+ assert.equal(events.filter(e=>e.type==='show').length,1);
+ config.layoutOnly=true;await control.updateConfig(config);assert.equal(control.isShow(),false);
+ await control.hide();assert.equal(events.filter(e=>e.type==='hide').length,1);
+ await control.cancel();
+});

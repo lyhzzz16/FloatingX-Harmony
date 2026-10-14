@@ -9,7 +9,8 @@ export interface FxConfigOptions {
   /** Optional drag threshold in vp. ANDROID_2 resolves an omitted value from the host ArkUI Pan configuration. */
   touchSlopVp?: number;
   focusPolicy?: FxFocusPolicy;
-  /** Keep mounted layout while drawing and input are disabled (Android INVISIBLE). */
+  /** Keep content mounted and allow drawing to advance layout, without presentation or interaction.
+   * The caller clears this flag after content layout and positioning are ready. */
   layoutOnly?: boolean;
   safeAreaPolicy?: FxSafeAreaPolicy;
   position?: FxPoint;

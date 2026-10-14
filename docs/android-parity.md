@@ -4,7 +4,7 @@
 
 - Android：FloatingX **2.3.7**，tag `2.3.7`，commit `a4b9dbfc1649accde832d2f70dd90d54bf5fac9a`。
 - Harmony：上游与本 fork 的 `731e834245492c8b43256de861208ed2abfe1c0c`。
-- 本预览版：`0.1.1-yb.5`。不宣称所有 Android API、默认值、窗口类型和设备表现均已完全相同。
+- 本预览版：`0.1.1-yb.6`。不宣称所有 Android API、默认值、窗口类型和设备表现均已完全相同。
 - 本轮修正父/子手势、释放回调和系统窗口异步移动；见 [.4 手势审计](gesture-round3.md)。初始化/尺寸变化、安全区、窗口生命周期、焦点与隐藏测量的历史 C01～C25 记录见 [.2/.3 对齐记录](parity-round2.md)。不包含业务状态、倒计时、导航、录音或窗口切换策略。
 
 最新 .5 修复浮窗区域命中穿透，并提供显式 `contentOwnsTap`，见 [原生输入回归](native-input-regression.md)。该选项默认 false，必须配合 ANDROID_2；true 时父 Tap 在仲裁前拒绝，未接管 UP/CANCEL 仅观察，实际 Pan 释放不受影响。

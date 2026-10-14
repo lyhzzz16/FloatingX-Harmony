@@ -7,7 +7,7 @@ loadScopePlatform();
 const {FxFloatView,device}=loadFloatViewPolicy();
 function surface(options={}) {
  const view=new FxFloatView();const config=new FxConfig({gestureMode:'android-2',...options});
- view.platform={getSnapshot:()=>({config}),canStartPan:()=>true};return {view,config};
+ view.platform={getSnapshot:()=>({config,visible:true}),canStartPan:()=>true};return {view,config};
 }
 const recognizer=tag=>({getTag:()=>tag,prevented:0,preventBegin(){this.prevented++;}});
 const touchRecognizer=id=>({getEventTargetInfo:()=>({getId:()=>id}),cancelled:0,cancelTouch(){this.cancelled++;}});
@@ -37,4 +37,22 @@ test('native root isolates hierarchy, preserves DisplayOnly and legacy modes, an
  Object.defineProperty(HitTestMode,'BLOCK_HIERARCHY',{configurable:true,get(){throw Error('API20 enum accessed');}});
  try{assert.equal(view.hitTestMode(0),HitTestMode.Default);assert.equal(view.judge({},recognizer(view.surfaceId+'tap'),[]),GestureJudgeResult.REJECT);}
  finally{Object.defineProperty(HitTestMode,'BLOCK_HIERARCHY',{configurable:true,writable:true,value});device.sdkApiVersion=26;}
+});
+
+test('hidden and prepared surfaces reject recognition without canceling children or blocking lower content',()=>{
+ for(const gestureMode of ['android-2','legacy'])for(const displayMode of ['normal','click-only','display-only']) {
+  const {view,config}=surface({gestureMode,displayMode});
+  let visible=true;view.platform.getSnapshot=()=>({config,visible});
+  const child=recognizer('child'),touch=touchRecognizer('child');
+  let starts=0;view.platform.canStartPan=()=>{starts++;return true;};
+  for(const prepared of [true,false]) {
+   config.layoutOnly=prepared;visible=prepared;
+   assert.equal(view.hitTestMode(0),HitTestMode.None);
+   for(const tag of [view.surfaceId+'tap',view.surfaceId+'x',view.surfaceId+'y','child'])
+    assert.equal(view.judge({},recognizer(tag),[child],[touch]),GestureJudgeResult.REJECT);
+  }
+  assert.equal(starts,0);assert.equal(child.prevented,0);assert.equal(touch.cancelled,0);
+  visible=true;config.layoutOnly=false;
+  assert.equal(view.hitTestMode(0),displayMode==='display-only'?HitTestMode.None:gestureMode==='legacy'?HitTestMode.Transparent:HitTestMode.BLOCK_HIERARCHY);
+ }
 });

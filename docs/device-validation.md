@@ -1,3 +1,7 @@
+# 0.1.1-yb.6 验证记录
+
+2026-10-15：290/290 核心测试、独立 HAR 与 Demo 构建通过；原生 RenderNode 绘制驱动的 Scope/App/System 全流程、Home 后 System 首显/更新和透明区域输入透传通过。具体事件顺序、Hidden 对照结果和未验收边界见 [透明预布局验证](render-layout.md)。CMP 与消费应用未构建、未验收。
+
 # 0.1.1-yb.5 验证记录
 
 2026-10-14，SGT-AL10 / API26。独立“输入回归”Demo 使用 App 浮层，覆盖原生纵向/横向列表；CMP 与消费应用未构建、未验收。实现与证据映射见 [原生输入回归](native-input-regression.md)。
