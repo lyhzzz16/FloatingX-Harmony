@@ -1,3 +1,24 @@
+# 0.1.1-yb.5 验证记录
+
+2026-10-14，SGT-AL10 / API26。独立“输入回归”Demo 使用 App 浮层，覆盖原生纵向/横向列表；CMP 与消费应用未构建、未验收。实现与证据映射见 [原生输入回归](native-input-regression.md)。
+
+- 288/288 核心回归通过，含 TypeScript 编译，无跳过。两项 .4 对照分别复现子点击误触发父释放、旧 Tap 微任务吞掉新序列待处理释放；.5 回归通过。
+- HAR 与 signed/unsigned Demo HAP 构建通过；恢复本地签名前的 build-profile，未执行清理。仍有最低 API12 与受保护 API20 调用等编译警告。本版 ANDROID_2 运行门槛仍为 API20。
+- .5 Demo 已安装，测试者完成内容拥有点击模式下 A/B 点击、按钮/文字起拖及浮窗外列表滑动，反馈“正常”。
+
+| 场景 | 实际证据 | 结论边界 |
+| --- | --- | --- |
+| A/B 手指短点击 | 16:40:16.443–16.542 seq1：helper DOWN、A DOWN/UP、observer UP、A click；17.521–17.590 seq2 同样为 B click | 各点击一次，两个序列无父 release/UP/库 click，无子 CANCEL，无下层事件 |
+| 手指按钮起拖 | seq3：21.299 A DOWN，21.512 A CANCEL(type3)，27.870 父 release dragged=true/UP；seq4–6 同样有 A/B CANCEL 与正常父释放 | 未出现迟到子 click；保留父终止接收器 |
+| 手指文字起拖 | seq7/8 各一次 helper DOWN 和父 release dragged=true/UP，无按钮事件 | 普通非按钮内容起拖正常；并非猜测子消费结果 |
+| 手指浮窗与下层隔离 | seq1–8 的每个 DOWN→UP 区间内无 lower touch/scroll；三组 lower DOWN/UP/scroll 在父拖动结束后出现；页面计数子点击2、父释放6、下层 DOWN3/MOVE326/滚动3 | 与人工反馈共同支持浮窗内不滚下层、浮窗外正常；本次下层手指记录主要为纵向 |
+| 默认父 Tap 兼容 | 原生 uitest 注入：切到父 Tap 模式，点浮窗文字；子点击0、父释放1、显示 parent click；下层 DOWN/MOVE/滚动均0 | 原生 UI 自动输入单次验证，区别于手指；不宣称复杂子归属自动识别 |
+| 宽度变化与离开初始边界 | 内容宽220→280vp后，从新增右侧范围开始注入斜向滑动并离开初始边界；父释放1，下层 DOWN/MOVE/滚动均0；文字位置由(308,1278)变为(524,1643)px | 原生 UI 自动输入验证当前投影参与命中、序列保持在浮窗内处理 |
+| 移动后旧位置透传 | 浮窗移动后，从原区域注入横向滑动；下层 DOWN1/MOVE97/滚动1，父释放仍1 | 原区域没有残留触摸屏障 |
+| 隐藏与恢复 | 隐藏后在原浮窗区域注入纵向滑动，下层累计 DOWN2/MOVE171/滚动2；布局无浮窗节点；显示并复位后按钮节点恢复，计数不变 | 普通 hide/show 单次验证；拖动中 hide/destroy/config-change 仅核心回归覆盖 |
+
+补充 UI 测试使用系统 uitest 注入，不冒充真实手指；独立原生列表不代表真实 CMP/XComponent。缺少当前 CMP 子处理日志，未证明其是否收到有效 Cancel，也未替消费应用验收点击、折叠和布局变化。DisplayOnly、平板、多指、旋转/分屏及 API20/23 真机不在本轮设备范围。
+
 # 0.1.1-yb.4 验证记录
 
 2026-10-14，SGT-AL10 / API26，独立 Demo；CMP 与接入应用未构建、未验收。

@@ -76,3 +76,11 @@ test('Android gesture slop allows a host default and validates explicit override
  const c=new FxConfig({gestureMode:'android-2',touchSlopVp:12,focusPolicy:'non-focusable',safeAreaPolicy:'avoid-system',layoutOnly:true}).copy();
  assert.equal(c.touchSlopVp,12);assert.equal(c.gestureMode,'android-2');assert.equal(c.focusPolicy,'non-focusable');assert.equal(c.layoutOnly,true);assert.equal(c.safeAreaPolicy,'avoid-system');
 });
+
+test('content tap ownership is explicit, copied and restricted to the native Android mode', () => {
+  assert.equal(new FxConfig().contentOwnsTap,false);
+  const config=new FxConfig({gestureMode:'android-2',contentOwnsTap:true});
+  const copy=config.copy();config.contentOwnsTap=false;assert.equal(copy.contentOwnsTap,true);
+  for(const value of [null,1,'true'])invalid(()=>new FxConfig({gestureMode:'android-2',contentOwnsTap:value}));
+  invalid(()=>new FxConfig({contentOwnsTap:true}));
+});

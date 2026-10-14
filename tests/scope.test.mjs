@@ -376,3 +376,48 @@ test('Android ClickOnly parent movement cancels candidate without moving or prod
  s.platform.handleTouch(touch(0,1,100,100,0));s.platform.handleTouch(touch(2,1,108,100,1));s.platform.handleTouch(touch(2,1,100,100,2));s.platform.handleTouch(touch(1,1,100,100,3));
  assert.equal(clicks,0);assert.equal(drags,0);assert.equal(s.platform.getPosition().x,0);await s.controller.cancel();
 });
+
+test('content-owned tap and jitter only observe terminals; neither create pending taps nor execute parent layout callbacks',async()=>{
+ const phases=[];let releases=0,ups=0,clicks=0;
+ const s=await setup({gestureMode:'android-2',contentOwnsTap:true,adsorb:true,edgeAdsorb:'right'},
+  {onTouch:e=>phases.push(e.phase),onRelease:()=>{releases++;s.controller.move(100,100);return 'consumed';},onUp:()=>ups++,onClick:()=>clicks++});
+ for(const terminal of [TouchType.Up,TouchType.Cancel]) {
+  s.platform.handleTouch(touch(0,1,100,100,0),true);
+  s.platform.handleTouch(touch(2,1,101,101,10),true);
+  s.platform.completeSurfaceTap();s.platform.handleTouch(touch(terminal,1,101,101,20),true);
+  s.platform.completeSurfaceTap();await Promise.resolve();
+  assert.equal(s.platform.pendingTap,undefined);assert.equal(s.platform.hasPrimaryPointer(),false);
+ }
+ assert.deepEqual(phases,['down','move','up','down','move','cancel']);
+ assert.deepEqual([releases,ups,clicks],[0,0,0]);assert.deepEqual(s.platform.getPosition(),{x:0,y:0});await s.controller.cancel();
+});
+test('content-owned mode preserves actual Pan terminal even without a delivered MOVE, and consumed drag release',async()=>{
+ const released=[];let ups=0;const s=await setup({gestureMode:'android-2',contentOwnsTap:true},
+ {onRelease:e=>{released.push(e);return 'consumed';},onUp:()=>ups++});
+ for(const move of [false,true]) {
+  s.platform.handleTouch(touch(0,1,100,100,0),true);
+  s.platform.handlePan({fingerList:[{id:1,globalX:108,globalY:100}],timestamp:10000000},true);
+  if(move)s.platform.handlePan({fingerList:[{id:1,globalX:120,globalY:100}],timestamp:20000000});
+  s.platform.handleTouch(touch(1,1,140,100,30),true);s.platform.completeSurfaceTap();await Promise.resolve();
+ }
+ assert.deepEqual(released.map(e=>e.dragged),[false,true]);assert.equal(ups,0);assert.equal(s.platform.getPosition().x,20);await s.controller.cancel();
+});
+test('queued parent Tap cannot survive content-ownership change, hide or destroy',async()=>{
+ for(const stop of ['config','hide','destroy']) {
+  let releases=0;const phases=[];const s=await setup({gestureMode:'android-2'}, {onRelease:()=>{releases++;return 'default';},onTouch:e=>phases.push(e.phase)});
+  s.platform.handleTouch(touch(0,1,100,100,0),true);
+  s.platform.handleTouch(touch(1,1,100,100,10),true);s.platform.completeSurfaceTap();
+  const stopping=stop==='config'?s.platform.applyConfig(new FxConfig({gestureMode:'android-2',contentOwnsTap:true})):
+   stop==='hide'?s.controller.hide():s.controller.cancel();
+  await stopping;await Promise.resolve();assert.equal(releases,0);assert.equal(s.platform.pendingTap,undefined);assert.ok(phases.includes('up'));
+  await s.controller.cancel();
+ }
+});
+test('stale parent Tap microtask cannot erase a newer sequence pending release',async()=>{
+ let releases=0;const s=await setup({gestureMode:'android-2'},{onRelease:()=>{releases++;return 'default';}});
+ for(let id=1;id<=2;id++) {
+  s.platform.handleTouch(touch(0,id,100,100,id*100),true);
+  s.platform.handleTouch(touch(1,id,100,100,id*100+10),true);s.platform.completeSurfaceTap();
+ }
+ await Promise.resolve();assert.equal(releases,1);await s.controller.cancel();
+});

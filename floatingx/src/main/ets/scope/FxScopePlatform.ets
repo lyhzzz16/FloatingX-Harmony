@@ -250,12 +250,13 @@ export class FxScopePlatform implements FxPlatform {
     }
   }
   completeSurfaceTap(): void {
-    if(this.boundary?.displayPointers)return;
+    if(this.boundary?.displayPointers || this.snapshot.config.contentOwnsTap)return;
     const generation=this.interactionGeneration;
     Promise.resolve().then(() => {
+      if(this.snapshot.config.contentOwnsTap || generation!==this.interactionGeneration)return;
       const event=this.pendingTap;const result=this.pendingTapResult;
+      if(event===undefined || generation!==this.pendingTapGeneration)return;
       this.pendingTap=undefined;this.pendingTapResult=undefined;
-      if(event===undefined || generation!==this.pendingTapGeneration || generation!==this.interactionGeneration)return;
       this.finishTouch(event,false,result,false);
     });
   }
@@ -363,7 +364,7 @@ export class FxScopePlatform implements FxPlatform {
     if(released===undefined)return;
     if(owned)this.finishTouch(released,wasDragged,result);
     else {
-      if(event.type===TouchType.Up) {this.pendingTap=released;this.pendingTapResult=result;this.pendingTapGeneration=this.interactionGeneration;}
+      if(event.type===TouchType.Up && !this.snapshot.config.contentOwnsTap) {this.pendingTap=released;this.pendingTapResult=result;this.pendingTapGeneration=this.interactionGeneration;}
       this.observeTouch(released);
     }
   }

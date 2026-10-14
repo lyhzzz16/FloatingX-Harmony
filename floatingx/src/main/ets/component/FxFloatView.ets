@@ -19,8 +19,18 @@ export struct FxFloatView {
   @Prop revision: number = 0;
   private claimedAxis: string = '';
   private surfaceId: string = 'FloatingXSurface_'+(++surfaceSequence).toString();
+  // Snapshot is adapter-owned, so every ArkUI expression must observe its revision.
+  private currentSnapshot(_revision: number): FxScopeSnapshot { return this.platform.getSnapshot(); }
+  private hitTestMode(_revision: number): HitTestMode {
+    const config=this.currentSnapshot(_revision).config;
+    if(config.displayMode===FxDisplayMode.DisplayOnly)return HitTestMode.None;
+    if(config.gestureMode!==FxGestureMode.ANDROID_2)return HitTestMode.Transparent;
+    // ANDROID_2 activation rejects API <20; keep the enum access guarded during rendering too.
+    return deviceInfo.sdkApiVersion>=20?HitTestMode.BLOCK_HIERARCHY:HitTestMode.Default;
+  }
   private judge(event: BaseGestureEvent, current: GestureRecognizer, others: GestureRecognizer[], touches?: TouchRecognizer[]): GestureJudgeResult {
     if(deviceInfo.sdkApiVersion<20)return GestureJudgeResult.REJECT;
+    if(current.getTag()===this.surfaceId+'tap')return this.currentSnapshot(this.revision).config.contentOwnsTap?GestureJudgeResult.REJECT:GestureJudgeResult.CONTINUE;
     if(current.getTag()!==this.surfaceId+'x' && current.getTag()!==this.surfaceId+'y')return GestureJudgeResult.CONTINUE;
     if(this.currentSnapshot(this.revision).config.displayMode!==FxDisplayMode.Normal)return GestureJudgeResult.REJECT;
     if(!this.platform.canStartPan(event))return GestureJudgeResult.REJECT;
@@ -46,8 +56,6 @@ export struct FxFloatView {
     })
     .position(this.currentSnapshot(this.revision).projection.contentOffset)
   }
-  // Snapshot is adapter-owned, so every ArkUI expression must observe its revision.
-  private currentSnapshot(_revision: number): FxScopeSnapshot { return this.platform.getSnapshot(); }
   build() {
     if (this.currentSnapshot(this.revision).content !== undefined) {
       Stack({ alignContent: Alignment.TopStart }) {
@@ -70,7 +78,7 @@ export struct FxFloatView {
               return HitTestMode.Default;
             })
             .onTouch((event: TouchEvent) => this.platform.handleTouch(event,true))
-            .gesture(TapGesture().onAction(() => this.platform.completeSurfaceTap()))
+            .gesture(TapGesture().tag(this.surfaceId+'tap').onAction(() => this.platform.completeSurfaceTap()))
             .parallelGesture(PanGesture({direction:PanDirection.Vertical,distance:this.currentSnapshot(this.revision).config.touchSlopVp!})
               .tag(this.surfaceId+'y')
               .onActionStart((event: GestureEvent) => this.platform.handlePan(event,true))
@@ -97,7 +105,7 @@ export struct FxFloatView {
       .enabled(!this.currentSnapshot(this.revision).config.layoutOnly && (this.currentSnapshot(this.revision).config.gestureMode===FxGestureMode.ANDROID_2 || this.currentSnapshot(this.revision).config.displayMode !== FxDisplayMode.DisplayOnly))
       .opacity(this.currentSnapshot(this.revision).opacity)
       .visibility(this.currentSnapshot(this.revision).visible && !this.currentSnapshot(this.revision).config.layoutOnly ? Visibility.Visible:Visibility.Hidden)
-      .hitTestBehavior(this.currentSnapshot(this.revision).config.displayMode === FxDisplayMode.DisplayOnly ? HitTestMode.None:HitTestMode.Transparent)
+      .hitTestBehavior(this.hitTestMode(this.revision))
     }
   }
 }

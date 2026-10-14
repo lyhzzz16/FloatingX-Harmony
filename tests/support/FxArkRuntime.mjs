@@ -74,3 +74,19 @@ export function loadSystemAdapter(nativeBoundary) {
  delete require.cache[destination];
  try{return require(destination);}finally{Module._load=original;}
 }
+
+/** Execute only the component's policy methods; ArkUI build DSL and native hit dispatch are not simulated. */
+export function loadFloatViewPolicy(sdkApiVersion=26) {
+ const root=path.resolve(import.meta.dirname,'../..');const file=path.join(root,'floatingx/src/main/ets/component/FxFloatView.ets');
+ const source=fs.readFileSync(file,'utf8');
+ const methods=source.slice(0,source.indexOf('  @Builder')).replace('@Component\n','').replace('export struct FxFloatView','export class FxFloatView').replace('@Prop ','')+'\n}';
+ const destination=path.join(root,'work/core/component/FxFloatViewPolicy.js');
+ fs.writeFileSync(destination,ts.transpileModule(methods,{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText);
+ const device={sdkApiVersion};
+ globalThis.HitTestMode={Default:0,Block:1,Transparent:2,None:3,BLOCK_HIERARCHY:4};
+ globalThis.GestureJudgeResult={CONTINUE:0,REJECT:1};
+ const Module=require('node:module');const original=Module._load;
+ Module._load=function(name,...args){if(name==='@ohos.deviceInfo')return {default:device};return original.call(this,name,...args);};
+ delete require.cache[destination];
+ try{return {FxFloatView:require(destination).FxFloatView,device};}finally{Module._load=original;}
+}

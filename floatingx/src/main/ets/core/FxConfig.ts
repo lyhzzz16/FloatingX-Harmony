@@ -4,6 +4,8 @@ import { FxPoint, FxInsets, FxGravity, FxEdgeAdsorb, FxDisplayMode, FxAnimationC
 export interface FxConfigOptions {
   boundaryMode?: FxBoundaryMode;
   gestureMode?: FxGestureMode;
+  /** ANDROID_2: content owns ordinary taps; parent Pan and its release remain enabled. */
+  contentOwnsTap?: boolean;
   /** Optional drag threshold in vp. ANDROID_2 resolves an omitted value from the host ArkUI Pan configuration. */
   touchSlopVp?: number;
   focusPolicy?: FxFocusPolicy;
@@ -39,6 +41,7 @@ function requireBoolean(value: boolean, field: string): void {
 export class FxConfig {
   boundaryMode: FxBoundaryMode;
   gestureMode: FxGestureMode;
+  contentOwnsTap: boolean;
   touchSlopVp?: number;
   focusPolicy: FxFocusPolicy;
   layoutOnly: boolean;
@@ -60,6 +63,7 @@ export class FxConfig {
     this.safeAreaPolicy = options.safeAreaPolicy === undefined ? FxSafeAreaPolicy.HOST : options.safeAreaPolicy;
     this.layoutOnly = options.layoutOnly === undefined ? false : options.layoutOnly;
     this.gestureMode = options.gestureMode === undefined ? FxGestureMode.LEGACY : options.gestureMode;
+    this.contentOwnsTap = options.contentOwnsTap === undefined ? false : options.contentOwnsTap;
     this.touchSlopVp = options.touchSlopVp;
     this.focusPolicy = options.focusPolicy === undefined ? FxFocusPolicy.DEFAULT : options.focusPolicy;
     this.boundaryMode = options.boundaryMode === undefined ? FxBoundaryMode.CONTENT : options.boundaryMode;
@@ -84,6 +88,8 @@ export class FxConfig {
     if(![FxSafeAreaPolicy.HOST,FxSafeAreaPolicy.AVOID_SYSTEM,FxSafeAreaPolicy.EXTEND].includes(this.safeAreaPolicy))throw new FxError('INVALID_CONFIG','Unknown safeAreaPolicy');
     requireBoolean(this.layoutOnly, 'layoutOnly');
     if (this.gestureMode !== FxGestureMode.LEGACY && this.gestureMode !== FxGestureMode.ANDROID_2) throw new FxError('INVALID_CONFIG', 'Unknown gestureMode');
+    requireBoolean(this.contentOwnsTap, 'contentOwnsTap');
+    if (this.contentOwnsTap && this.gestureMode !== FxGestureMode.ANDROID_2) throw new FxError('INVALID_CONFIG', 'contentOwnsTap requires ANDROID_2');
     if (this.focusPolicy !== FxFocusPolicy.DEFAULT && this.focusPolicy !== FxFocusPolicy.NON_FOCUSABLE) throw new FxError('INVALID_CONFIG', 'Unknown focusPolicy');
     if (this.touchSlopVp !== undefined) {
       requireNonnegative(this.touchSlopVp, 'touchSlopVp');
@@ -118,7 +124,7 @@ export class FxConfig {
 
   copy(): FxConfig {
     const options: FxConfigOptions = {
-      safeAreaPolicy: this.safeAreaPolicy, layoutOnly: this.layoutOnly, gestureMode: this.gestureMode, touchSlopVp: this.touchSlopVp, focusPolicy: this.focusPolicy,
+      safeAreaPolicy: this.safeAreaPolicy, layoutOnly: this.layoutOnly, gestureMode: this.gestureMode, contentOwnsTap: this.contentOwnsTap, touchSlopVp: this.touchSlopVp, focusPolicy: this.focusPolicy,
       boundaryMode: this.boundaryMode, position: this.position, gravity: this.gravity, offset: this.offset, margin: this.margin,
       displayMode: this.displayMode, adsorb: this.adsorb, edgeAdsorb: this.edgeAdsorb, rebound: this.rebound,
       halfHide: this.halfHide, halfHideRatio: this.halfHideRatio, animation: this.animation,

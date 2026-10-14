@@ -41,7 +41,7 @@ export struct AppDemo {
         onRelease:() => this.consumed?FxReleaseDecision.CONSUMED:FxReleaseDecision.DEFAULT}});
     if(!this.pageOwner.hold(controller))return;
     this.controller=controller;
-    this.message='API 20+ 整窗手势；示例阈值 8vp'; this.run(controller.show());
+    this.message='API 20+ 整窗手势；宿主默认阈值'; this.run(controller.show());
   }
   private async resize(): Promise<void> {
     const control=this.controller;if(control===undefined)return;

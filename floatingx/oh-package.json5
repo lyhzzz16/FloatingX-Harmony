@@ -1,7 +1,7 @@
 {
   "modelVersion": "5.0.0",
   "name": "floatingx",
-  "version": "0.1.1-yb.4",
+  "version": "0.1.1-yb.5",
   "description": "FloatingX-Harmony floating window library for HarmonyOS Stage applications",
   "main": "Index.ets",
   "dependencies": {},

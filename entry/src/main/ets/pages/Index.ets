@@ -1,3 +1,4 @@
+import { InputDemo } from './InputDemo';
 import { ParityDemo } from './ParityDemo';
 import { MultipleDemo } from './MultipleDemo';
 import { ScopeDemo } from './ScopeDemo';
@@ -13,6 +14,7 @@ struct Index {
   }
   build() {
     Tabs() {
+      TabContent() { InputDemo() }.tabBar('输入回归')
       TabContent() { ParityDemo() }.tabBar('等价验证')
       TabContent() { ScopeDemo() }.tabBar('局部')
       TabContent() { AppDemo() }.tabBar('应用')

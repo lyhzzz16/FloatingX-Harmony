@@ -1,6 +1,6 @@
 # Fork 版本交付、接入与验收
 
-本 fork 的 `0.1.1-yb.4` 是 Android 2.3.7 对齐预览版。源码依据、能力边界和事件契约见 [对齐审计](android-parity.md)。MIT 允许维护 fork 和分发修改版本，分发时保留 LICENSE、上游版权及第三方许可信息。
+本 fork 的 `0.1.1-yb.5` 是 Android 2.3.7 对齐预览版。源码依据、能力边界和事件契约见 [对齐审计](android-parity.md)。MIT 允许维护 fork 和分发修改版本，分发时保留 LICENSE、上游版权及第三方许可信息。
 
 ## 先用本地 HAR 验证
 
@@ -9,12 +9,12 @@
 ```json5
 {
   "dependencies": {
-    "floatingx": "file:./libs/floatingx-v0.1.1-yb.4.har"
+    "floatingx": "file:./libs/floatingx-v0.1.1-yb.5.har"
   }
 }
 ```
 
-在 DevEco 执行依赖同步后，检查 lock 中解析出的版本和文件路径；应用里输出 `FLOATINGX_VERSION` 应为 `0.1.1-yb.4`。不要同时保留另一个来源的 floatingx。先保持默认 CONTENT/LEGACY 运行原有用例，再明确开启 boundaryMode/gestureMode 的 ANDROID_2，；touchSlopVp 可省略使用所属 UIContext 默认值，或显式传正有限覆盖值；整窗子触摸取消要求运行 API20+。迁移契约与未关闭边界见 [.4 手势审计](gesture-round3.md)。
+在 DevEco 执行依赖同步后，检查 lock 中解析出的版本和文件路径；应用里输出 `FLOATINGX_VERSION` 应为 `0.1.1-yb.5`。不要同时保留另一个来源的 floatingx。先保持默认 CONTENT/LEGACY 运行原有用例，再明确开启 boundaryMode/gestureMode 的 ANDROID_2，；touchSlopVp 可省略使用所属 UIContext 默认值，或显式传正有限覆盖值；整窗子触摸取消要求运行 API20+。迁移契约与未关闭边界见 [.5 原生输入修复](native-input-regression.md)。
 
 HAR 自身无需应用签名；Demo HAP 在商业设备运行需要本机开发签名。签名材料、账号、设备标识及带证书的本地配置不进入仓库和公共 Release。系统浮窗的开发签名权限不代表正式上架权限已通过。
 
@@ -54,7 +54,7 @@ hvigorw --mode module -p module=entry@default -p product=default assembleHap --n
 
 ## 最小验证路径
 
-Demo 首页有「等价验证」「局部」「应用」「系统」「多实例」页。
+Demo 首页新增「输入回归」（App 浮层覆盖原生双向列表），另有「等价验证」「局部」「应用」「系统」「多实例」页。
 
 | 场景 | 操作及预期 | 证据层级 |
 | --- | --- | --- |
