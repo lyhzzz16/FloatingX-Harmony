@@ -1,11 +1,11 @@
 import { FxConfig } from './FxConfig';
 import { FxError } from './FxError';
-import { FxPoint } from './FxTypes';
+import { FxPoint, FxGeometrySnapshot, FxLayoutListener, FxTouchCancelReason } from './FxTypes';
 
 export enum FxScope { SCOPE = 'scope', APP = 'app', SYSTEM = 'system' }
 export enum FxState {
   IDLE = 'idle', SHOWING = 'showing', VISIBLE = 'visible', HIDDEN = 'hidden',
-  DESTROYING = 'destroying', DESTROYED = 'destroyed'
+  PREPARED = 'prepared', DESTROYING = 'destroying', DESTROYED = 'destroyed'
 }
 export enum FxEventType {
   ATTACH = 'attach', DETACH = 'detach', SHOW = 'show', HIDE = 'hide', MOVE = 'move', CONFIG = 'config', DESTROY = 'destroy', ERROR = 'error'
@@ -25,6 +25,10 @@ export interface FxLogger { error(error: FxError): void; }
  */
 export interface FxPlatform {
   readonly actualScope?: FxScope;
+  getGeometrySnapshot?(): FxGeometrySnapshot;
+  subscribeLayout?(listener: FxLayoutListener): () => void;
+  flushGeometry?(): Promise<void>;
+  cancelTouch?(reason: FxTouchCancelReason): void;
   create(): Promise<void>;
   show(): Promise<void>;
   hide(): Promise<void>;
@@ -36,6 +40,7 @@ export interface FxPlatform {
   /** Actual resource attachment, independent of user show intent. */
   subscribeLifecycle?(listener: (type: FxEventType) => void): () => void;
   isHostVisible?(): boolean;
+  isActuallyVisible?(): boolean;
   /** Optional second gate: create may attach an invisible root before native layout. */
   isReadyToShow?(): boolean;
   /** Must resolve interrupted native animation promises; called before queueing hide/cancel/move. */

@@ -1,3 +1,5 @@
+import { FxWindowHost } from '../app/FxWindowHost';
+import { FxTouchCancelReason, FxGeometrySnapshot, FxFocusPolicy, FxSafeAreaPolicy } from '../core/FxTypes';
 import window from '@ohos.window';
 import display from '@ohos.display';
 import abilityAccessCtrl from '@ohos.abilityAccessCtrl';
@@ -28,12 +30,15 @@ class FxSystemBoundary implements FxScopeBoundary {
   constructor(owner: FxSystemOwner) {this.owner=owner;}
   move(point: FxPoint, animate: boolean): Promise<FxPoint> {return this.owner.move(point,animate);}
   moveFrame(point: FxPoint): void {this.owner.moveFrame(point);}
+  cancelPending(): void {this.owner.cancelAnimations();}
+  flush(): Promise<void> {return this.owner.flushGeometry();}
 }
 export class FxSystemPageView implements FxSystemView {
   private engine: FxScopePlatform;
   interactions: FxInteractions;
   private owner: FxSystemOwner;
   private releaseContentSize?: () => void;
+  private releaseContentLayout?: () => void;
   private contentSize: FxSize;
   constructor(owner: FxSystemOwner, context: UIContext, source: FxContentSource, interactions: FxInteractions) {
     this.owner=owner;
@@ -44,6 +49,7 @@ export class FxSystemPageView implements FxSystemView {
       if(size.width===this.contentSize.width && size.height===this.contentSize.height)return;
       this.contentSize={width:size.width,height:size.height};this.owner.layoutContent(this.contentSize);
     });
+    this.releaseContentLayout=this.engine.subscribeLayout((geometry: FxGeometrySnapshot) => {if(geometry.measured)this.owner.layoutContent(geometry.content,true);});
     this.engine.mountHost(context,source);this.engine.layoutHost(owner.getGeometry().viewport.size,owner.getGeometry().viewport.insets);
   }
   async create(): Promise<void> {await this.engine.create();this.owner.attachView(this);}
@@ -55,14 +61,20 @@ export class FxSystemPageView implements FxSystemView {
     const projection=this.owner.getProjection();result.projection={position:{x:0,y:0},visibleSize:projection.visibleSize,contentOffset:projection.contentOffset};return result;
   }
   layoutContent(size: FxSize): void {this.engine.layoutContent(size);}
-  handleTouch(event: TouchEvent): void {if(event.type===TouchType.Down && !this.engine.hasPrimaryPointer())this.owner.cancelAnimations();this.engine.handleTouch(event);}
+  handleTouch(event: TouchEvent, observeOnly: boolean = false): void {if(event.type===TouchType.Down && !this.engine.hasPrimaryPointer())this.owner.cancelAnimations();this.engine.handleTouch(event,observeOnly);}
+  canStartPan(event: BaseGestureEvent): boolean {return this.engine.canStartPan(event);}
+  handlePan(event: GestureEvent, starting: boolean = false): void {this.engine.handlePan(event,starting);}
+  completeSurfaceTap(): void {this.engine.completeSurfaceTap();}
   async applyConfig(config: FxConfig): Promise<void> {this.engine.layoutHost(this.owner.getGeometry().viewport.size,this.owner.getGeometry().viewport.insets);await this.engine.applyConfig(config);this.adoptPosition(this.owner.getPosition());}
   show(): Promise<void> {return this.engine.show();} hide(): Promise<void> {return this.engine.hide();}
   async destroy(): Promise<void> {
     if(this.releaseContentSize!==undefined)this.releaseContentSize();this.releaseContentSize=undefined;
+    if(this.releaseContentLayout!==undefined)this.releaseContentLayout();this.releaseContentLayout=undefined;
     try{await this.engine.destroy();}finally{this.owner.detachView();}
   }
-  cancelAnimations(): void {this.engine.cancelAnimations();this.engine.cancelTouch();}
+  nativeHidden(): void {this.engine.nativeHidden();}
+  cancelTouch(reason: FxTouchCancelReason): void {this.engine.cancelTouch(reason);}
+  cancelAnimations(): void {this.engine.cancelAnimations();}
   adoptPosition(point: FxPoint): void {
     const target=this.owner.getGeometry().viewport;const current=this.engine.getGeometry().viewport;
     if(target.size.width!==current.size.width || target.size.height!==current.size.height || target.insets.left!==current.insets.left || target.insets.top!==current.insets.top || target.insets.right!==current.insets.right || target.insets.bottom!==current.insets.bottom) {
@@ -104,12 +116,17 @@ class FxWindowAdapter implements FxNativeWindow {
   get terminated(): boolean {return this.disposed;}
   private native: window.Window;private id: string;private source: FxContentSource;private interactions: FxInteractions;
   private touchable: boolean = true;private focusable: boolean = false;private hidden: boolean = false;
+  private viewportHost?: FxWindowHost;
+  private safeAreaPolicy: FxSafeAreaPolicy = FxSafeAreaPolicy.HOST;
+  private viewportChangeKey?: string;
+  private focusPolicy: FxFocusPolicy = FxFocusPolicy.DEFAULT;
   private prepared: boolean = false;
   private disposed: boolean = false;
   private readbacks: FxRectReadback[] = [];
   private confirmed?: FxNativeRect;
   private destruction?: Promise<void>;
-  constructor(native: window.Window, id: string, source: FxContentSource, interactions: FxInteractions) {this.native=native;this.id=id;this.source=source;this.interactions=interactions;this.focusable=native.getWindowProperties().focusable;}
+  private externallyDestroyed: boolean = false;
+  constructor(native: window.Window, id: string, source: FxContentSource, interactions: FxInteractions, viewportHost?: FxWindowHost) {this.viewportHost=viewportHost;this.native=native;this.id=id;this.source=source;this.interactions=interactions;this.focusable=native.getWindowProperties().focusable;}
   async load(owner: FxSystemOwner): Promise<void> {
     pageEntries.set(this.id,new FxSystemPageEntry(owner,this.source,this.interactions));
     const storage: LocalStorage=new LocalStorage();storage.setOrCreate<string>('fxSystemInstanceId',this.id);
@@ -137,7 +154,7 @@ class FxWindowAdapter implements FxNativeWindow {
   async show(): Promise<void> {
     if(this.disposed)throw new FxError('DESTROYED','Native window is released');
     const previous=this.native.getWindowProperties();
-    try {await this.native.setWindowTouchable(this.touchable);await this.native.setWindowFocusable(this.touchable && this.focusable);await this.native.showWindow();this.hidden=false;this.prepared=true;}
+    try {await this.native.setWindowTouchable(this.touchable);await this.native.setWindowFocusable(this.touchable && this.focusable && this.focusPolicy!==FxFocusPolicy.NON_FOCUSABLE);await this.native.showWindow();this.hidden=false;this.prepared=true;}
     catch(error) {await this.restoreInteraction(previous.touchable,previous.focusable);throw error as Error;}
   }
   async hide(): Promise<void> {
@@ -156,7 +173,7 @@ class FxWindowAdapter implements FxNativeWindow {
     this.destruction=this.destroyNative(failure);return this.destruction;
   }
   private async destroyNative(failure?: Error): Promise<void> {
-    try {await this.native.destroyWindow();} catch(error) {if(failure===undefined)failure=error as Error;}
+    try {if(!this.externallyDestroyed)await this.native.destroyWindow();} catch(error) {if(failure===undefined)failure=error as Error;}
     finally {pageEntries.delete(this.id);}
     if(failure!==undefined)throw failure;
   }
@@ -166,10 +183,15 @@ class FxWindowAdapter implements FxNativeWindow {
     const before=this.getRect();if(before.width===size.width && before.height===size.height)return;
     await this.readTransaction(window.RectChangeReason.UNDEFINED,() => this.native.resize(size.width,size.height));
   }
+  async setFocusPolicy(policy: FxFocusPolicy): Promise<void> {
+    if(this.disposed)throw new FxError('DESTROYED','Native window is released');
+    await this.native.setWindowFocusable(!this.hidden && this.touchable && this.focusable && policy!==FxFocusPolicy.NON_FOCUSABLE);
+    this.focusPolicy=policy;
+  }
   async setTouchable(value: boolean): Promise<void> {
     if(this.disposed)throw new FxError('DESTROYED','Native window is released');
     const previous=this.native.getWindowProperties();
-    try {await this.native.setWindowTouchable(this.hidden?false:value);await this.native.setWindowFocusable(!this.hidden && value && this.focusable);this.touchable=value;}
+    try {await this.native.setWindowTouchable(this.hidden?false:value);await this.native.setWindowFocusable(!this.hidden && value && this.focusable && this.focusPolicy!==FxFocusPolicy.NON_FOCUSABLE);this.touchable=value;}
     catch(error){await this.restoreInteraction(previous.touchable,previous.focusable);throw error as Error;}
   }
   async setBackground(color: string): Promise<void> {this.native.setWindowBackgroundColor(color);}
@@ -220,22 +242,66 @@ class FxWindowAdapter implements FxNativeWindow {
   }
   private readProperties(): FxNativeRect {const rect=this.native.getWindowProperties().windowRect;return {x:rect.left,y:rect.top,width:rect.width,height:rect.height};}
   getRect(): FxNativeRect {return this.confirmed===undefined ? this.readProperties():{x:this.confirmed.x,y:this.confirmed.y,width:this.confirmed.width,height:this.confirmed.height};}
+  setSafeAreaPolicy(policy: FxSafeAreaPolicy): void {
+    this.safeAreaPolicy=policy;
+    if(this.viewportChangeKey!==undefined)this.viewportChangeKey=this.readViewportChangeKey();
+  }
   getViewport(): FxNativeViewport {
     const id=this.native.getWindowProperties().displayId;
     if(id===undefined)throw new FxError('CAPABILITY_UNSUPPORTED','Target window display id unavailable');
     const target=display.getDisplayByIdSync(id);const density=target.densityPixels;
-    return {size:{width:target.width/density,height:target.height/density},insets:{left:0,top:0,right:0,bottom:0},density:density};
+    const size: FxSize={width:target.width/density,height:target.height/density};
+    if(this.safeAreaPolicy===FxSafeAreaPolicy.AVOID_SYSTEM) {
+      if(this.viewportHost===undefined)throw new FxError('CAPABILITY_UNSUPPORTED','System AVOID_SYSTEM requires viewportHost from the target display');
+      const viewport=this.viewportHost.getSystemViewport(id,size,density);
+      return {size:viewport.size,insets:viewport.insets,density:density};
+    }
+    return {size:size,insets:{left:0,top:0,right:0,bottom:0},density:density};
+  }
+  isShowing(): boolean {
+    if(this.disposed)return false;
+    try {return this.native.isWindowShowing();}catch(_){return false;}
+  }
+  subscribeVisibility(listener: (destroyed: boolean) => void): () => void {
+    const callback=(event: window.WindowEventType) => {
+      if(this.disposed)return;
+      if(event===window.WindowEventType.WINDOW_DESTROYED) {
+        this.externallyDestroyed=true;this.disposed=true;pageEntries.delete(this.id);
+        for(let i=0;i<this.readbacks.length;i++)this.readbacks[i].fail(new FxError('DESTROYED','Native window was destroyed externally'));
+        listener(true);
+      } else if(event===window.WindowEventType.WINDOW_HIDDEN && this.prepared)listener(false);
+    };
+    this.native.on('windowEvent',callback);
+    return () => {try{this.native.off('windowEvent',callback);}catch(error){if(!this.externallyDestroyed)throw error as Error;}};
+  }
+  private readViewportChangeKey(): string {
+    const viewport=this.getViewport();const id=this.native.getWindowProperties().displayId;
+    if(id===undefined)throw new FxError('CAPABILITY_UNSUPPORTED','Target window display id unavailable');
+    const rotation=display.getDisplayByIdSync(id).rotation;
+    return JSON.stringify([id,rotation,viewport.density,viewport.size.width,viewport.size.height,
+      viewport.insets.left,viewport.insets.top,viewport.insets.right,viewport.insets.bottom]);
   }
   subscribe(listener: () => void): () => void {
-    const changed=() => {this.confirmed=undefined;listener();};display.on('change',changed);
-    return () => {display.off('change',changed);};
+    this.viewportChangeKey=this.readViewportChangeKey();
+    const changed=() => {
+      let key: string;
+      try {key=this.readViewportChangeKey();}
+      catch(_) {this.confirmed=undefined;listener();return;}
+      // Display notifications also cover changes that do not alter pointer coordinates.
+      if(key===this.viewportChangeKey)return;
+      this.viewportChangeKey=key;this.confirmed=undefined;listener();
+    };
+    display.on('change',changed);
+    const releaseHost=this.viewportHost?.subscribe(changed);
+    return () => {try{display.off('change',changed);}finally{this.viewportChangeKey=undefined;if(releaseHost!==undefined)releaseHost();}};
   }
 }
 let instanceSequence: number = 0;
 /** SYSTEM_FLOAT_WINDOW is system_grant; checking never requests a user permission dialog. */
 export class FxNativeWindowFactory implements FxWindowFactory {
   private context: common.UIAbilityContext;private source: FxContentSource;private interactions: FxInteractions;
-  constructor(context: common.UIAbilityContext, source: FxContentSource, interactions: FxInteractions = {}) {this.context=context;this.source=source;this.interactions=interactions;}
+  private viewportHost?: FxWindowHost;
+  constructor(context: common.UIAbilityContext, source: FxContentSource, interactions: FxInteractions = {}, viewportHost?: FxWindowHost) {this.viewportHost=viewportHost;this.context=context;this.source=source;this.interactions=interactions;}
   async checkAccess(): Promise<void> {
     try {
       const info=await bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
@@ -246,7 +312,7 @@ export class FxNativeWindowFactory implements FxWindowFactory {
   async create(): Promise<FxNativeWindow> {
     const id='FloatingXSystem_'+(++instanceSequence).toString();
     let allocated: window.Window | undefined;
-    try {allocated=await window.createWindow({name:id,windowType:window.WindowType.TYPE_FLOAT,ctx:this.context});return new FxWindowAdapter(allocated,id,this.source,this.interactions);}
+    try {allocated=await window.createWindow({name:id,windowType:window.WindowType.TYPE_FLOAT,ctx:this.context});return new FxWindowAdapter(allocated,id,this.source,this.interactions,this.viewportHost);}
     catch(error) {
       if(allocated!==undefined) {
         try{await allocated.destroyWindow();}

@@ -5,10 +5,10 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { loadScopePlatform, loadAppPlatforms, loadSystemAdapter, AppWindow, ScopeContext } from './support/FxArkRuntime.mjs';
 const require=createRequire(import.meta.url);const ts=require('typescript');
-const nodes=[];const native={created:[],permissionReads:[],displayReads:[],grant:-1};
+const frames=[];const nodes=[];const native={created:[],permissionReads:[],displayReads:[],grant:-1};
 loadScopePlatform();const {FxWindowHost}=loadAppPlatforms();loadSystemAdapter(native);
 const Module=require('node:module');const original=Module._load;
-Module._load=function(name,...args){if(name==='@ohos.arkui.node')return {FrameNode:class{constructor(){this.commonEvent={setOnSizeChange(){}};}getMeasuredSize(){return {width:0,height:0};}addComponentContent(node){this.node=node;}dispose(){}},NodeContent:class{addFrameNode(frame){this.frame=frame;}removeFrameNode(){this.frame=undefined;}},ComponentContent:class{constructor(context,builder,params){this.params=params;this.updates=[];nodes.push(this);}update(params){this.params=params;this.updates.push(params);}dispose(){this.disposed=true;}}};return original.call(this,name,...args);};
+Module._load=function(name,...args){if(name==='@ohos.arkui.node')return {FrameNode:class{constructor(){frames.push(this);this.measured={width:0,height:0};this.commonEvent={setOnSizeChange(){}};}setNeedsLayout(){}setLayoutPosition(){}getChildrenCount(){return 0;}setMeasuredSize(size){this.measured=size;}getMeasuredSize(){return this.measured;}addComponentContent(node){this.node=node;}dispose(){}},NodeContent:class{addFrameNode(frame){this.frame=frame;}removeFrameNode(){this.frame=undefined;}},ComponentContent:class{constructor(context,builder,params){this.params=params;this.updates=[];nodes.push(this);}update(params){this.params=params;this.updates.push(params);}dispose(){this.disposed=true;}}};return original.call(this,name,...args);};
 for(const file of ['component/FxContent','scope/FxHostBinding','FloatingX']){const destination=path.resolve('work/core',file+'.js');fs.mkdirSync(path.dirname(destination),{recursive:true});fs.writeFileSync(destination,ts.transpileModule(fs.readFileSync('floatingx/src/main/ets/'+file+'.ets','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText);}
 const {FloatingX}=require('../work/core/FloatingX.js');const {FxContent,contentSource}=require('../work/core/component/FxContent.js');const {FxConfig}=require('../work/core/core/FxConfig.js');const {FxController}=require('../work/core/core/FxController.js');const {FakePlatform,deferred}=await import('./support/FxFakes.mjs');
 Module._load=original;
@@ -115,4 +115,53 @@ test('public fallback lifecycle reports app scope from its first actual attach',
  ]);
  await item.cancel();assert.equal(window.overlay.nodes.size,0);assert.equal(h.controllers.length,0);assert.equal(h.listeners.length,0);
  await h.dispose();FloatingX.setLogger(undefined);
+});
+
+function completeLayout(frame,width=50,height=50) {
+ frame.getChildrenCount=()=>1;frame.getChild=()=>({measure(){},getMeasuredSize(){return {width,height};},layout(){}});
+ frame.onMeasure({maxSize:{width:300,height:500},minSize:{width:0,height:0}});frame.onLayout({x:0,y:0});
+}
+test('public layout completion returns measured detached geometry and preserves the mount',async()=>{
+ const source=content();const control=FloatingX.createScope({content:source,config:new FxConfig()});
+ const platform=require('../work/core/scope/FxHostBinding.js').scopeHostBinding(control).platform;
+ platform.mountHost(new ScopeContext(),contentSource(source));platform.layoutHost({width:300,height:500});await control.show();
+ const frame=frames.at(-1);const node=nodes.at(-1);let finished=false;
+ const pending=control.updateContentAndWaitForLayout({label:'large'}).then(value=>{finished=true;return value;});await Promise.resolve();assert.equal(finished,false);
+ completeLayout(frame,100,70);const geometry=await pending;assert.deepEqual(geometry.content,{width:100,height:70});assert.equal(geometry.measured,true);assert.ok(geometry.instanceId>0);assert.equal(nodes.at(-1),node);
+ geometry.content.width=999;assert.equal(control.getGeometrySnapshot().content.width,100);await control.cancel();
+});
+test('host hiding after measure but before native flush invalidates public layout completion',async()=>{
+ const source=content();const control=FloatingX.createScope({content:source,config:new FxConfig()});
+ const platform=require('../work/core/scope/FxHostBinding.js').scopeHostBinding(control).platform;
+ platform.mountHost(new ScopeContext(),contentSource(source));platform.layoutHost({width:300,height:500});await control.show();
+ const gate=deferred();platform.flushGeometry=()=>gate.promise;
+ const pending=control.updateContentAndWaitForLayout({label:'late'});const rejected=assert.rejects(pending,{code:'LAYOUT_SUPERSEDED'});await Promise.resolve();completeLayout(frames.at(-1));
+ for(let i=0;i<8;i++)await Promise.resolve();await require('../work/core/scope/FxHostBinding.js').scopeHostBinding(control).controller.setHostVisible(false);gate.resolve();await rejected;await control.cancel();
+});
+test('public layout wait rejects hidden content instead of waiting for an absent frame',async()=>{
+ const source=content();const control=FloatingX.createScope({content:source,config:new FxConfig()});
+ await assert.rejects(control.updateContentAndWaitForLayout({label:'hidden'}),{code:'NO_HOST'});await control.cancel();
+});
+
+test('public layoutOnly prepares invisible measured content, moves, then reveals without re-mounting',async()=>{
+ const source=content();const config=new FxConfig({layoutOnly:true,adsorb:false});const control=FloatingX.createScope({content:source,config});
+ const platform=require('../work/core/scope/FxHostBinding.js').scopeHostBinding(control).platform;
+ platform.mountHost(new ScopeContext(),contentSource(source));platform.layoutHost({width:300,height:500});await control.show();
+ assert.equal(control.isShow(),false);assert.equal(control.getState(),'prepared');
+ const frame=frames.at(-1);const pending=control.updateContentAndWaitForLayout({label:'prepared'});await Promise.resolve();completeLayout(frame);await pending;
+ await control.move(90,100);config.layoutOnly=false;await control.updateConfig(config);assert.equal(control.isShow(),true);assert.equal(control.getState(),'visible');assert.equal(frames.at(-1),frame);assert.equal(control.getX(),90);await control.cancel();
+});
+
+test('prepared SHOW remains a lifecycle event and revealing does not synthesize another SHOW',async()=>{
+ const events=[];const source=content();const config=new FxConfig({layoutOnly:true,adsorb:false});
+ const control=FloatingX.createScope({content:source,config,events:event=>events.push({type:event.type,state:control.getState()})});
+ const platform=require('../work/core/scope/FxHostBinding.js').scopeHostBinding(control).platform;
+ platform.mountHost(new ScopeContext(),contentSource(source));platform.layoutHost({width:300,height:500});
+ await control.show();assert.equal(control.isShow(),false);
+ assert.deepEqual(events.filter(e=>e.type==='show'),[{type:'show',state:'prepared'}]);
+ config.layoutOnly=false;await control.updateConfig(config);assert.equal(control.isShow(),true);
+ assert.equal(events.filter(e=>e.type==='show').length,1);
+ config.layoutOnly=true;await control.updateConfig(config);assert.equal(control.isShow(),false);
+ await control.hide();assert.equal(events.filter(e=>e.type==='hide').length,1);
+ await control.cancel();
 });

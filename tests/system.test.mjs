@@ -22,13 +22,13 @@ test('native animation advances actual frames and cancellation cannot commit sta
 test('controller cancel during native allocation destroys once without showing',async()=>{const {FxController}=require('../work/core/core/FxController.js');const f=new FakeWindowFactory();const gate=deferred();const original=f.create.bind(f);f.create=async()=>{await gate.promise;return original();};const p=new FxSystemPlatform(f,systemGeometry());const controller=new FxController(p,new FxConfig(),undefined,{error(){}});p.bindController(controller);const showing=controller.show();const observed=assert.rejects(showing,{code:'DESTROYED'});await Promise.resolve();await Promise.resolve();const canceled=controller.cancel();gate.resolve();await observed;await canceled;assert.equal(f.native.calls.filter(x=>x==='destroy').length,1);assert.ok(!f.native.calls.includes('show'));});
 test('system eligibility persists when main app is backgrounded and destroy clears delayed native frame',async()=>{const f=new FakeWindowFactory();const p=new FxSystemPlatform(f,systemGeometry());await p.create();assert.equal(p.isHostVisible(),true);await p.show();await p.destroy();assert.equal(p.isHostVisible(),false);assert.equal(f.native.calls.filter(x=>x==='destroy').length,1);});
 import {loadSystemAdapter,ScopeContent,ScopeContext} from './support/FxArkRuntime.mjs';
-function nativeBoundary(){const boundary={grant:0,created:[],permissionReads:[],displayReads:[],display:{width:600,height:1000,densityPixels:2},view:undefined};boundary.window={properties:{displayId:42,focusable:true,touchable:true,windowRect:{left:0,top:0,width:100,height:100}},operations:[],failures:new Map(),getWindowProperties(){return {...this.properties,windowRect:{...this.properties.windowRect}};},async invoke(name){this.operations.push(name);if(this.failures.has(name)){const error=this.failures.get(name);this.failures.delete(name);throw error;}},async setWindowTouchable(value){await this.invoke('touchable');this.properties.touchable=value;},async setWindowFocusable(value){await this.invoke('focusable');this.properties.focusable=value;},async showWindow(){await this.invoke('show');},async destroyWindow(){await this.invoke('destroy');},setWindowBackgroundColor(value){this.operations.push('background');this.background=value;},async resize(width,height){await this.invoke('resize');this.properties.windowRect.width=width;this.properties.windowRect.height=height;},async moveWindowTo(x,y){await this.invoke('move');this.properties.windowRect.left=x;this.properties.windowRect.top=y;},async loadContentByName(name,storage){await this.invoke('load');boundary.route=name;boundary.storage=storage;const entry=boundary.api.FxSystemPageRegistry.find(storage.get('fxSystemInstanceId'));boundary.view=new boundary.api.FxSystemPageView(entry.owner,new ScopeContext(),entry.source,entry.interactions);await boundary.view.create();}};boundary.window.callbacks=new Map();boundary.window.on=(name,fn)=>boundary.window.callbacks.set(name,fn);boundary.window.off=(name,fn)=>{if(boundary.window.callbacks.get(name)===fn)boundary.window.callbacks.delete(name);};boundary.window.emitRect=reason=>boundary.window.callbacks.get('windowRectChange')?.({reason,rect:{...boundary.window.properties.windowRect}});const resize=boundary.window.resize;boundary.window.resize=async(w,h)=>{await resize.call(boundary.window,w,h);boundary.window.emitRect(0);};const move=boundary.window.moveWindowTo;boundary.window.moveWindowTo=async(x,y)=>{await move.call(boundary.window,x,y);boundary.window.emitRect(3);};boundary.window.getUIContext=()=>new ScopeContext();boundary.api=loadSystemAdapter(boundary);return boundary;}
-test('real native adapter checks access token lazily and packages named route with per-instance storage',async()=>{const b=nativeBoundary();const source=new ScopeContent();const f=new b.api.FxNativeWindowFactory({},source);assert.equal(b.permissionReads.length,0);await f.checkAccess();assert.deepEqual(b.permissionReads,[[123,'ohos.permission.SYSTEM_FLOAT_WINDOW']]);const p=new FxSystemPlatform(f,systemGeometry());await p.create();assert.equal(b.route,'FloatingXSystemPage');assert.match(b.storage.get('fxSystemInstanceId'),/^FloatingXSystem_/);assert.deepEqual(b.displayReads,[42]);assert.equal(source.mounts.length,1);assert.equal(b.window.background,'#00000000');await p.destroy();assert.equal(b.api.FxSystemPageRegistry.find(b.storage.get('fxSystemInstanceId')),undefined);assert.equal(source.disposals,1);});
+function nativeBoundary(){const boundary={grant:0,created:[],permissionReads:[],displayReads:[],display:{width:600,height:1000,densityPixels:2},view:undefined};boundary.window={properties:{displayId:42,focusable:true,touchable:true,windowRect:{left:0,top:0,width:100,height:100}},operations:[],failures:new Map(),getWindowProperties(){return {...this.properties,windowRect:{...this.properties.windowRect}};},async invoke(name){this.operations.push(name);if(this.failures.has(name)){const error=this.failures.get(name);this.failures.delete(name);throw error;}},async setWindowTouchable(value){await this.invoke('touchable');this.properties.touchable=value;},async setWindowFocusable(value){await this.invoke('focusable');this.properties.focusable=value;},async showWindow(){await this.invoke('show');},async destroyWindow(){await this.invoke('destroy');},setWindowBackgroundColor(value){this.operations.push('background');this.background=value;},async resize(width,height){await this.invoke('resize');this.properties.windowRect.width=width;this.properties.windowRect.height=height;},async moveWindowTo(x,y){await this.invoke('move');this.properties.windowRect.left=x;this.properties.windowRect.top=y;},async loadContentByName(name,storage){await this.invoke('load');boundary.route=name;boundary.storage=storage;const entry=boundary.api.FxSystemPageRegistry.find(storage.get('fxSystemInstanceId'));boundary.view=new boundary.api.FxSystemPageView(entry.owner,new ScopeContext(),entry.source,entry.interactions);await boundary.view.create();}};boundary.window.isWindowShowing=()=>true;boundary.window.callbacks=new Map();boundary.window.on=(name,fn)=>boundary.window.callbacks.set(name,fn);boundary.window.off=(name,fn)=>{if(boundary.window.callbacks.get(name)===fn)boundary.window.callbacks.delete(name);};boundary.window.emitRect=reason=>boundary.window.callbacks.get('windowRectChange')?.({reason,rect:{...boundary.window.properties.windowRect}});const resize=boundary.window.resize;boundary.window.resize=async(w,h)=>{await resize.call(boundary.window,w,h);boundary.window.emitRect(0);};const move=boundary.window.moveWindowTo;boundary.window.moveWindowTo=async(x,y)=>{await move.call(boundary.window,x,y);boundary.window.emitRect(3);};boundary.window.getUIContext=()=>new ScopeContext();boundary.api=loadSystemAdapter(boundary);return boundary;}
+test('real native adapter checks access token lazily and packages named route with per-instance storage',async()=>{const b=nativeBoundary();const source=new ScopeContent();const f=new b.api.FxNativeWindowFactory({},source);assert.equal(b.permissionReads.length,0);await f.checkAccess();assert.deepEqual(b.permissionReads,[[123,'ohos.permission.SYSTEM_FLOAT_WINDOW']]);const p=new FxSystemPlatform(f,systemGeometry());await p.create();assert.equal(b.route,'FloatingXSystemPage');assert.match(b.storage.get('fxSystemInstanceId'),/^FloatingXSystem_/);assert.ok(b.displayReads.length>0 && b.displayReads.every(id=>id===42));assert.equal(source.mounts.length,1);assert.equal(b.window.background,'#00000000');await p.destroy();assert.equal(b.api.FxSystemPageRegistry.find(b.storage.get('fxSystemInstanceId')),undefined);assert.equal(source.disposals,1);});
 test('API12 hidden system surface is invisible, non-touchable and non-focusable; show restores target properties',async()=>{const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();await p.applyConfig(new FxConfig({adsorb:false}));await p.show();await p.hide();assert.equal(b.view.getSnapshot().visible,false);assert.equal(b.window.properties.touchable,false);assert.equal(b.window.properties.focusable,false);await p.show();assert.equal(b.window.properties.touchable,true);assert.equal(b.window.properties.focusable,true);await p.applyConfig(new FxConfig({displayMode:'display-only'}));await p.hide();await p.show();assert.equal(b.window.properties.touchable,false);assert.equal(b.window.properties.focusable,false);await p.destroy();});
 test('hide native property failure rejects and restores visible interaction state',async()=>{const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();await p.applyConfig(new FxConfig());await p.show();b.window.failures.set('focusable',Error('focus failure'));await assert.rejects(p.hide(),/focus failure/);assert.equal(b.window.properties.touchable,true);assert.equal(b.window.properties.focusable,true);assert.equal(b.view.getSnapshot().visible,true);await p.destroy();});
 test('system drag consumes display vp despite moving local coordinates and saves only final native readback',async()=>{const {FxController}=require('../work/core/core/FxController.js');const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());const saved=[];const controller=new FxController(p,new FxConfig({adsorb:false,position:{x:10,y:10}}),undefined,{error(){}});p.bindController(controller);controller.bindPositionStorage({namespace:'tests',key:'system',storage:{async load(){},async save(key,record){saved.push({key,record});},async clear(){}}},()=>p.getGeometry());await controller.show();const event=(type,displayX,windowX)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX,displayY:100,windowX,windowY:0}]});b.view.handleTouch(event(TouchType.Down,100,0));b.view.handleTouch(event(TouchType.Move,120,0));for(let i=0;i<15;i++)await Promise.resolve();assert.equal(p.getPosition().x,30);assert.equal(saved.length,0);b.view.handleTouch(event(TouchType.Up,140,-20));for(let i=0;i<25;i++)await Promise.resolve();assert.equal(p.getPosition().x,50);assert.equal(saved.length,1);assert.equal(saved[0].record.position.x,50);assert.match(saved[0].key,/system/);await controller.cancel();});
 test('new system pointer cancels native animation and cannot resume older frame',async()=>{const b=nativeBoundary();const clock=new TestClock();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry(),undefined,undefined,clock);await p.create();await p.applyConfig(new FxConfig({adsorb:false,animation:{enabled:true,durationMs:100,curve:'linear'}}));const moving=p.move({x:100,y:100},true);for(let i=0;i<8;i++)await Promise.resolve();b.view.handleTouch({type:TouchType.Down,timestamp:1000000,changedTouches:[{id:1,displayX:100,displayY:100,windowX:0,windowY:0}]});clock.advance(100);await moving;assert.deepEqual(p.getPosition(),{x:0,y:0});await p.destroy();});
-test('secondary system pointer cannot reset the shared primary gesture',async()=>{const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();await p.applyConfig(new FxConfig({adsorb:false,position:{x:10,y:10}}));const event=(type,id,x)=>({type,timestamp:1000000,changedTouches:[{id,displayX:x,displayY:100,windowX:0,windowY:0}]});b.view.handleTouch(event(TouchType.Down,1,100));b.view.handleTouch(event(TouchType.Down,2,1000));b.view.handleTouch(event(TouchType.Move,1,120));for(let i=0;i<20;i++)await Promise.resolve();assert.equal(p.getPosition().x,30);await p.destroy();});
+test('secondary system pointer cannot reset the shared primary gesture',async()=>{const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();await p.applyConfig(new FxConfig({adsorb:false,position:{x:10,y:10}}));await p.show();const event=(type,id,x)=>({type,timestamp:1000000,changedTouches:[{id,displayX:x,displayY:100,windowX:0,windowY:0}]});b.view.handleTouch(event(TouchType.Down,1,100));b.view.handleTouch(event(TouchType.Down,2,1000));b.view.handleTouch(event(TouchType.Move,1,120));for(let i=0;i<20;i++)await Promise.resolve();assert.equal(p.getPosition().x,30);await p.destroy();});
 test('native access checks classify only actual permission or capability errors as fallback-eligible',async()=>{for(const [code,expected]of [[201,'PERMISSION_DENIED'],[801,'CAPABILITY_UNSUPPORTED'],[16000050,'WINDOW_OPERATION_FAILED']]){const b=nativeBoundary();b.accessError=Object.assign(Error('access API failed'),{code});const f=new b.api.FxNativeWindowFactory({},new ScopeContent());await assert.rejects(f.checkAccess(),{code:expected,platformCode:code});}});
 
 test('configuration waits for and supersedes an in-flight native projection without rollback corruption',async()=>{
@@ -43,7 +43,7 @@ test('configuration waits for and supersedes an in-flight native projection with
  assert.equal(p.getProjection().visibleSize.width,25);assert.equal(f.native.getRect().width,25);assert.deepEqual(p.getPosition(),{x:0,y:20});await p.destroy();
 });
 test('display density and viewport change refresh shared drag release bounds',async()=>{
- const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();await p.applyConfig(new FxConfig({adsorb:false,position:{x:10,y:10}}));
+ const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();await p.applyConfig(new FxConfig({adsorb:false,position:{x:10,y:10}}));await p.show();
  b.display.width=1500;b.display.densityPixels=3;b.displayListener(42);for(let i=0;i<20;i++)await Promise.resolve();assert.equal(p.getGeometry().viewport.size.width,500);
  const event=(type,x)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:x,displayY:100,windowX:0,windowY:0}]});
  b.view.handleTouch(event(TouchType.Down,100));b.view.handleTouch(event(TouchType.Move,490));for(let i=0;i<20;i++)await Promise.resolve();assert.equal(p.getPosition().x,408);
@@ -64,7 +64,7 @@ test('failed cleanup after adapter construction failure prohibits fallback even 
 });
 test('changed viewport insets feed shared nearest-edge settlement before native projection',async()=>{
  const b=nativeBoundary();const f=new FakeWindowFactory();const p=new FxSystemPlatform(f,systemGeometry());await p.create();
- const view=new b.api.FxSystemPageView(p,new ScopeContext(),new ScopeContent(),{});await view.create();await p.applyConfig(new FxConfig({position:{x:30,y:20},adsorb:true,edgeAdsorb:FxEdgeAdsorb.LEFT_RIGHT}));
+ const view=new b.api.FxSystemPageView(p,new ScopeContext(),new ScopeContent(),{});await view.create();await p.applyConfig(new FxConfig({position:{x:30,y:20},adsorb:true,edgeAdsorb:FxEdgeAdsorb.LEFT_RIGHT}));await p.show();
  f.native.viewport.size={width:500,height:500};f.native.viewport.insets={left:30,top:5,right:40,bottom:20};await p.move({x:30,y:20},false);
  const event=(type,x)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:x,displayY:100,windowX:0,windowY:0}]});
  view.handleTouch(event(TouchType.Down,100));view.handleTouch(event(TouchType.Move,292));for(let i=0;i<20;i++)await Promise.resolve();assert.equal(p.getPosition().x,268);
@@ -236,4 +236,134 @@ test('live system insets remap old complete range instead of reconstructing hist
  const f=new FakeWindowFactory();let changed;f.native.subscribe=listener=>{changed=listener;return ()=>{};};const p=new FxSystemPlatform(f,systemGeometry());
  await p.create();await p.applyConfig(new FxConfig({edgeAdsorb:'right',halfHide:true}));await p.move({x:250,y:225},false);
  f.native.viewport.insets={left:20,top:30,right:40,bottom:70};changed();await p.tail;assert.deepEqual(p.getPosition(),{x:210,y:205});assert.equal(p.getProjection().visibleSize.width,25);await p.destroy();
+});
+
+test('android system projection separates requested logical position and native correction',async()=>{
+ const f=new FakeWindowFactory();const p=new FxSystemPlatform(f,systemGeometry());await p.create();
+ await p.applyConfig(new FxConfig({boundaryMode:'android-2',adsorb:false,halfHide:true}));f.native.correction={x:5,y:0};
+ await p.move({x:-25,y:40},false);const g=p.getGeometrySnapshot();
+ assert.deepEqual(g.requestedPosition,{x:-25,y:40});assert.deepEqual(g.position,{x:-20,y:40});
+ assert.equal(g.projection.position.x,5);assert.equal(g.projection.visibleSize.width,25);assert.equal(g.coordinateSpace,'display');await p.destroy();
+});
+test('consumed system release cancels queued drag work before a new move',async()=>{
+ const b=nativeBoundary();let control;let release;
+ const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent(),{onRelease:e=>{release=e;control.move(70,90,false);return 'consumed';}}),systemGeometry());
+ const {FxController}=require('../work/core/core/FxController.js');control=new FxController(p,new FxConfig({adsorb:true}));p.bindController(control);await control.show();
+ const event=(type,x)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:x,displayY:100,windowX:0,windowY:0}]});
+ b.view.handleTouch(event(TouchType.Down,0));b.view.handleTouch(event(TouchType.Move,40));b.view.handleTouch(event(TouchType.Up,60));
+ await control.move(70,90,false);assert.equal(release.position.x,60);assert.deepEqual(p.getPosition(),{x:70,y:90});await control.cancel();
+});
+test('explicit App fallback forwards layout snapshots, flush failures and listener cleanup',async()=>{
+ const app=new FakePlatform();app.actualScope='app';let listener;let released=0;
+ app.subscribeLayout=value=>{listener=value;return ()=>{released++;listener=undefined;};};
+ app.getGeometrySnapshot=()=>({instanceId:0,layoutVersion:4,coordinateSpace:'host',content:{width:80,height:40}});
+ const gate=deferred();app.flushGeometry=()=>gate.promise;
+ const p=new FxSystemPlatform(new FakeWindowFactory('denied'),systemGeometry(),()=>app);
+ const seen=[];const off=p.subscribeLayout(value=>seen.push(value));await p.create();listener(app.getGeometrySnapshot());
+ assert.equal(seen[0].coordinateSpace,'host');assert.equal(seen[0].layoutVersion,4);
+ let done=false;const flushed=p.flushGeometry().then(()=>{done=true;});await Promise.resolve();assert.equal(done,false);gate.resolve();await flushed;
+ off();listener(app.getGeometrySnapshot());assert.equal(seen.length,1);await p.destroy();assert.equal(released,1);
+});
+
+test('explicit native non-focusable survives hide/show, display-only and content preparation',async()=>{
+ const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();
+ for(const layoutOnly of [false,true,false]) {
+  await p.applyConfig(new FxConfig({focusPolicy:'non-focusable',layoutOnly}));await p.show();
+  assert.equal(b.window.properties.focusable,false);assert.equal(b.window.properties.touchable,!layoutOnly);await p.hide();
+ }
+ await p.destroy();
+});
+test('external native hide invalidates visibility and active input without auto-show; destroy retires registry',async()=>{
+ const {FxController}=require('../work/core/core/FxController.js');const b=nativeBoundary();const source=new ScopeContent();const events=[];
+ const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},source),systemGeometry());const c=new FxController(p,new FxConfig(),e=>events.push(e.type),{error(){}});p.bindController(c);await c.show();
+ const shown=b.window.operations.filter(x=>x==='show').length;
+ b.window.callbacks.get('windowEvent')(4);assert.equal(c.isShow(),false);await c.setHostVisible(true);for(let i=0;i<12;i++)await Promise.resolve();
+ assert.equal(b.window.operations.filter(x=>x==='show').length,shown);assert.equal(events.filter(x=>x==='hide').length,1);
+ await c.show();assert.equal(c.isShow(),true);b.window.callbacks.get('windowEvent')(7);await c.cancel();
+ assert.equal(c.getState(),'destroyed');assert.equal(source.disposals,1);assert.equal(b.api.FxSystemPageRegistry.find(b.storage.get('fxSystemInstanceId')),undefined);
+});
+test('isShow consults authoritative OS visibility even before native lifecycle callback arrives',async()=>{
+ const {FxController}=require('../work/core/core/FxController.js');const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());const c=new FxController(p,new FxConfig(),undefined,{error(){}});p.bindController(c);await c.show();b.window.isWindowShowing=()=>false;assert.equal(c.isShow(),false);await c.cancel();
+});
+test('System avoid policy fails explicitly without authoritative host and uses target display with a host',async()=>{
+ const b=nativeBoundary();let called=false;const host={subscribe(){return ()=>{};},getSystemViewport(id,size,density){assert.equal(id,42);assert.equal(density,2);called=true;return {size,insets:{left:0,top:24,right:0,bottom:20}};}};
+ const f=new b.api.FxNativeWindowFactory({},new ScopeContent(),{},host);const native=await f.create();native.setSafeAreaPolicy('avoid-system');assert.equal(native.getViewport().insets.top,24);assert.equal(called,true);await native.destroy();
+ const other=nativeBoundary();const missing=await new other.api.FxNativeWindowFactory({},new ScopeContent()).create();missing.setSafeAreaPolicy('avoid-system');assert.throws(()=>missing.getViewport(),{code:'CAPABILITY_UNSUPPORTED'});await missing.destroy();
+});
+
+
+test('unchanged display notifications preserve a system drag after DOWN',async()=>{
+ const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());
+ await p.create();await p.applyConfig(new FxConfig({adsorb:false,position:{x:10,y:10},gestureMode:'android-2',touchSlopVp:8}));await p.show();
+ const event=(type,x)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:x,displayY:100,windowX:0,windowY:0}]});
+ b.view.handleTouch(event(TouchType.Down,100),true);
+ b.display.refreshRate=120;b.displayListener(42);b.display.refreshRate=60;b.displayListener(42);b.displayListener(99);
+ b.view.handlePan({fingerList:[{id:1,displayX:140,displayY:100}]});for(let i=0;i<30;i++)await Promise.resolve();
+ assert.equal(p.getPosition().x,50);
+ b.display.width=800;b.displayListener(42);for(let i=0;i<30;i++)await Promise.resolve();
+ const before=p.getPosition().x;b.view.handlePan({fingerList:[{id:1,displayX:180,displayY:100}]});
+ for(let i=0;i<30;i++)await Promise.resolve();assert.equal(p.getPosition().x,before);
+ await p.destroy();assert.equal(b.displayListener,undefined);
+});
+test('native display subscription observes coordinate changes once and ignores equal repeats',async()=>{
+ const b=nativeBoundary();const f=new b.api.FxNativeWindowFactory({},new ScopeContent());const native=await f.create();let changes=0;
+ const release=native.subscribe(()=>changes++);
+ let expected=0;
+ for(const [key,value] of [['width',800],['height',1200],['densityPixels',3],['rotation',2]]) {
+  b.display[key]=value;b.displayListener(42);assert.equal(changes,++expected);
+  b.displayListener(42);assert.equal(changes,expected);
+ }
+ release();assert.equal(b.displayListener,undefined);await native.destroy();
+});
+
+test('safe area changes notify once and unsupported viewport keeps the existing error path',async()=>{
+ const b=nativeBoundary();let top=24;let fail=false;let hostChanged;
+ const host={subscribe(callback){hostChanged=callback;return ()=>{hostChanged=undefined;};},getSystemViewport(id,size){if(fail)throw new FxError('CAPABILITY_UNSUPPORTED','host is not fullscreen');return {size,insets:{left:0,top,right:0,bottom:20}};}};
+ const native=await new b.api.FxNativeWindowFactory({},new ScopeContent(),{},host).create();let changes=0;
+ const release=native.subscribe(()=>changes++);native.setSafeAreaPolicy('avoid-system');
+ hostChanged();assert.equal(changes,0);top=30;hostChanged();assert.equal(changes,1);hostChanged();assert.equal(changes,1);
+ fail=true;assert.doesNotThrow(()=>hostChanged());assert.equal(changes,2);assert.throws(()=>native.getViewport(),{code:'CAPABILITY_UNSUPPORTED'});
+ release();assert.equal(hostChanged,undefined);await native.destroy();
+});
+
+test('Android DisplayOnly retains native child input while layoutOnly disables the whole surface',async()=>{
+ const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent()),systemGeometry());await p.create();
+ await p.applyConfig(new FxConfig({gestureMode:'android-2',touchSlopVp:8,displayMode:'display-only'}));assert.equal(b.window.properties.touchable,true);
+ await p.applyConfig(new FxConfig({gestureMode:'android-2',touchSlopVp:8,displayMode:'display-only',layoutOnly:true}));assert.equal(b.window.properties.touchable,false);await p.destroy();
+});
+test('old System drag ack cannot replace last MOVE release position or a reentrant consumed move',async()=>{
+ const b=nativeBoundary();let control;let released;let destination;
+ const interactions={onRelease:e=>{released=e;destination=control.move(70,90,false);return 'consumed';}};
+ const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent(),interactions),systemGeometry());
+ const {FxController}=require('../work/core/core/FxController.js');control=new FxController(p,new FxConfig({adsorb:false,gestureMode:'android-2',touchSlopVp:8}));p.bindController(control);await control.show();
+ const one=deferred(),two=deferred(),enteredOne=deferred(),enteredTwo=deferred();const original=b.window.moveWindowTo;
+ b.window.moveWindowTo=async(x,y)=>{if(x===40){enteredOne.resolve();await one.promise;}if(x===80){enteredTwo.resolve();await two.promise;}await original.call(b.window,x,y);};
+ const event=(type,x)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:x,displayY:100,windowX:0,windowY:0}]});
+ b.view.handleTouch(event(TouchType.Down,100));b.view.handleTouch(event(TouchType.Move,120));await enteredOne.promise;
+ b.view.handleTouch(event(TouchType.Move,140));one.resolve();await enteredTwo.promise;
+ b.view.handleTouch(event(TouchType.Up,160));assert.equal(released.position.x,40);
+ two.resolve();await destination;assert.deepEqual(p.getPosition(),{x:70,y:90});await control.cancel();
+});
+test('Android system native coordinates truncate px while legacy retains rounding',async()=>{
+ for(const [gestureMode,expected] of [['android-2',20],['legacy',21]]) {
+  const f=new FakeWindowFactory();f.native.viewport.density=2;const p=new FxSystemPlatform(f,systemGeometry());await p.create();
+  await p.applyConfig(new FxConfig({gestureMode,touchSlopVp:8,adsorb:false}));await p.move({x:10.4,y:10.4},false);
+  assert.deepEqual(f.native.moves.at(-1),{x:expected,y:expected});await p.destroy();
+ }
+});
+test('System surface tap recognizer does not manufacture Android parent ownership',async()=>{
+ let releases=0;const b=nativeBoundary();const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent(),{onRelease:()=>{releases++;return 'default';}}),systemGeometry());await p.create();
+ await p.applyConfig(new FxConfig({gestureMode:'android-2',touchSlopVp:8}));await p.show();
+ const event=type=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:100,displayY:100,windowX:0,windowY:0}]});
+ b.view.handleTouch(event(TouchType.Down),true);b.view.completeSurfaceTap();b.view.handleTouch(event(TouchType.Up),true);await Promise.resolve();assert.equal(releases,0);await p.destroy();
+});
+test('consumed Android release without a new command retains the last handled MOVE on the native window',async()=>{
+ const b=nativeBoundary();let released;const p=new FxSystemPlatform(new b.api.FxNativeWindowFactory({},new ScopeContent(),{onRelease:e=>{released=e;return 'consumed';}}),systemGeometry());
+ await p.create();await p.applyConfig(new FxConfig({gestureMode:'android-2',touchSlopVp:8,adsorb:false}));await p.show();
+ const gate=deferred(),entered=deferred();const original=b.window.moveWindowTo;let first=true;
+ b.window.moveWindowTo=async(x,y)=>{if(first){first=false;entered.resolve();await gate.promise;}await original.call(b.window,x,y);};
+ const event=(type,x)=>({type,timestamp:1000000,changedTouches:[{id:1,displayX:x,displayY:100,windowX:0,windowY:0}]});
+ b.view.handleTouch(event(TouchType.Down,100));b.view.handleTouch(event(TouchType.Move,120));await entered.promise;
+ b.view.handleTouch(event(TouchType.Move,140));b.view.handleTouch(event(TouchType.Up,190));assert.equal(released.position.x,40);
+ gate.resolve();await p.flushGeometry();assert.equal(p.getPosition().x,40);await p.destroy();
 });

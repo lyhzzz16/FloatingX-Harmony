@@ -1,7 +1,7 @@
 import { FxConfig } from '../core/FxConfig';
 import { FxError } from '../core/FxError';
 import { FxPoint, FxSize, FxBounds, FxViewport, FxProjection, FxGravity, FxEdgeAdsorb,
-  FxEdge, FxPositionRecord } from '../core/FxTypes';
+  FxEdge, FxPositionRecord, FxBoundaryMode, FxGeometrySnapshot, FxSafeAreaPolicy } from '../core/FxTypes';
 
 export interface FxGeometryInput {
   viewport: FxViewport;
@@ -35,13 +35,28 @@ function validateBounds(limits: FxBounds): void {
 }
 
 /** Oversized content deterministically anchors at the leading inset + margin. */
-export function bounds(input: FxGeometryInput): FxBounds {
+export function bounds(input: FxGeometryInput, dragging: boolean = false): FxBounds {
   input.config.validate();
   validateSize(input.viewport.size); validateSize(input.content);
   const insets = input.viewport.insets;
   nonnegative(insets.left, 'insets.left'); nonnegative(insets.top, 'insets.top');
   nonnegative(insets.right, 'insets.right'); nonnegative(insets.bottom, 'insets.bottom');
   const margin = input.config.margin;
+  if (input.config.boundaryMode === FxBoundaryMode.ANDROID_2) {
+    const loose = dragging && input.config.rebound;
+    const half = input.config.halfHide ? input.content.width * input.config.halfHideRatio : 0;
+    const left=input.config.safeAreaPolicy===FxSafeAreaPolicy.AVOID_SYSTEM?insets.left:0;
+    const right=input.config.safeAreaPolicy===FxSafeAreaPolicy.AVOID_SYSTEM?insets.right:0;
+    const minX = left+(input.config.halfHide ? -half : (loose ? 0 : margin.left));
+    const minY = insets.top + (loose ? 0 : margin.top);
+    return {
+      minX: minX,
+      maxX: Math.max(minX, input.config.halfHide ? input.viewport.size.width - right - half :
+        input.viewport.size.width - right - input.content.width - (loose ? 0 : margin.right)),
+      minY: minY,
+      maxY: Math.max(minY, input.viewport.size.height - insets.bottom - input.content.height - (loose ? 0 : margin.bottom))
+    };
+  }
   const minX = insets.left + margin.left;
   const minY = insets.top + margin.top;
   const result: FxBounds = {
@@ -63,9 +78,23 @@ export function clamp(point: FxPoint, limits: FxBounds): FxPoint {
   return result;
 }
 
-/** Explicit coordinates, including (0,0), win over gravity; offset applies to either choice. */
+/** Explicit coordinates win over gravity; Android applies offset only to the gravity path. */
 export function initial(input: FxGeometryInput): FxPoint {
   const limits = bounds(input);
+  if (input.config.boundaryMode === FxBoundaryMode.ANDROID_2) {
+    const config=input.config;
+    if (config.position!==undefined) return clamp(config.position,limits);
+    const width=input.viewport.size.width-input.content.width;
+    const height=input.viewport.size.height-input.content.height;
+    let x=config.margin.left;let y=config.margin.top;
+    if ([FxGravity.TOP_CENTER,FxGravity.CENTER,FxGravity.BOTTOM_CENTER].includes(config.gravity)) x=width/2;
+    else if ([FxGravity.TOP_RIGHT,FxGravity.CENTER_RIGHT,FxGravity.BOTTOM_RIGHT].includes(config.gravity)) x=width-config.margin.right;
+    if ([FxGravity.CENTER_LEFT,FxGravity.CENTER,FxGravity.CENTER_RIGHT].includes(config.gravity)) y=height/2;
+    else if ([FxGravity.BOTTOM_LEFT,FxGravity.BOTTOM_CENTER,FxGravity.BOTTOM_RIGHT].includes(config.gravity)) y=height-config.margin.bottom;
+    // 2.3.7 LEFT_OR_BOTTOM starts at zero before safeX applies the final bounds.
+    if (config.gravity===FxGravity.BOTTOM_LEFT) x=0;
+    return clamp({x:x+config.offset.x,y:y+config.offset.y},limits);
+  }
   let x = limits.minX;
   let y = limits.minY;
   const position = input.config.position;
@@ -88,9 +117,12 @@ export function initial(input: FxGeometryInput): FxPoint {
   return clamp(shifted, limits);
 }
 
-/** Released coordinates always become legal; rebound controls the adapter's animation, not legality. */
+/** Resolves release positioning; Android mode preserves the drag position when adsorption is disabled. */
 export function settle(point: FxPoint, input: FxGeometryInput): FxPoint {
   const limits = bounds(input);
+  if (input.config.boundaryMode === FxBoundaryMode.ANDROID_2 && !input.config.adsorb) {
+    validatePoint(point); return {x:point.x,y:point.y};
+  }
   const result = clamp(point, limits);
   if (!input.config.adsorb) return result;
   switch (input.config.edgeAdsorb) {
@@ -99,10 +131,10 @@ export function settle(point: FxPoint, input: FxGeometryInput): FxPoint {
     case FxEdgeAdsorb.TOP: result.y = limits.minY; break;
     case FxEdgeAdsorb.BOTTOM: result.y = limits.maxY; break;
     case FxEdgeAdsorb.LEFT_RIGHT:
-      result.x = result.x - limits.minX <= limits.maxX - result.x ? limits.minX : limits.maxX;
+      result.x = (input.config.boundaryMode===FxBoundaryMode.ANDROID_2 ? point.x+input.content.width/2<input.viewport.size.width/2 : result.x-limits.minX<=limits.maxX-result.x) ? limits.minX : limits.maxX;
       break;
     case FxEdgeAdsorb.TOP_BOTTOM:
-      result.y = result.y - limits.minY <= limits.maxY - result.y ? limits.minY : limits.maxY;
+      result.y = (input.config.boundaryMode===FxBoundaryMode.ANDROID_2 ? point.y+input.content.height/2<input.viewport.size.height/2 : result.y-limits.minY<=limits.maxY-result.y) ? limits.minY : limits.maxY;
       break;
   }
   return result;
@@ -132,6 +164,18 @@ export function logicalEdge(point: FxPoint, input: FxGeometryInput): FxEdge {
 /** Native position and hit region describe only the visible slice; logical point stays full-sized. */
 export function project(point: FxPoint, input: FxGeometryInput): FxProjection {
   const limits = bounds(input);
+  if (input.config.boundaryMode === FxBoundaryMode.ANDROID_2) {
+    validatePoint(point);
+    const avoid=input.config.safeAreaPolicy===FxSafeAreaPolicy.AVOID_SYSTEM;
+    const left=avoid?input.viewport.insets.left:0,top=avoid?input.viewport.insets.top:0;
+    const right=input.viewport.size.width-(avoid?input.viewport.insets.right:0);
+    const bottom=input.viewport.size.height-(avoid?input.viewport.insets.bottom:0);
+    const x = Math.max(left, Math.min(right, point.x));
+    const y = Math.max(top, Math.min(bottom, point.y));
+    return {position:{x:x,y:y},contentOffset:{x:point.x-x,y:point.y-y},visibleSize:{
+      width:Math.max(0,Math.min(right,point.x+input.content.width)-x),
+      height:Math.max(0,Math.min(bottom,point.y+input.content.height)-y)}};
+  }
   const position = clamp(point, limits);
   const visibleSize: FxSize = { width: input.content.width, height: input.content.height };
   const contentOffset: FxPoint = { x: 0, y: 0 };
@@ -159,6 +203,22 @@ function relative(value: number, oldMin: number, oldMax: number, newMin: number,
   if (oldMin === oldMax) return newMin;
   const fraction = Math.max(0, Math.min(1, (value - oldMin) / (oldMax - oldMin)));
   return newMin + fraction * (newMax - newMin);
+}
+
+/** Android configuration changes preserve absolute coordinates and the previous nearest adsorption side. */
+export function resizePosition(point: FxPoint, oldViewport: FxSize, oldContent: FxSize, input: FxGeometryInput): FxPoint {
+  const limits=bounds(input);
+  const result=clamp(point,limits);
+  if (!input.config.adsorb) return result;
+  switch(input.config.edgeAdsorb) {
+    case FxEdgeAdsorb.LEFT: result.x=limits.minX;break;
+    case FxEdgeAdsorb.RIGHT: result.x=limits.maxX;break;
+    case FxEdgeAdsorb.TOP: result.y=limits.minY;break;
+    case FxEdgeAdsorb.BOTTOM: result.y=limits.maxY;break;
+    case FxEdgeAdsorb.LEFT_RIGHT: result.x=point.x+oldContent.width/2<oldViewport.width/2?limits.minX:limits.maxX;break;
+    case FxEdgeAdsorb.TOP_BOTTOM: result.y=point.y+oldContent.height/2<oldViewport.height/2?limits.minY:limits.maxY;break;
+  }
+  return result;
 }
 
 /** Live geometry owns exact historical bounds, unlike version-1 persisted records. */
@@ -194,5 +254,18 @@ export function restore(record: FxPositionRecord, input: FxGeometryInput): FxPoi
   const oldViewport: FxViewport = { size: record.viewport, insets: input.viewport.insets };
   const oldInput: FxGeometryInput = { viewport: oldViewport, content: input.content, config: input.config };
   const oldLimits = bounds(oldInput);
-  return remap(record.position, oldLimits, record.edge, limits);
+  return input.config.boundaryMode===FxBoundaryMode.ANDROID_2?clamp(record.position,limits):remap(record.position, oldLimits, record.edge, limits);
+}
+
+/** Copies adapter-owned geometry so consumers cannot mutate window state. */
+export function snapshot(input: FxGeometryInput, position: FxPoint, projection: FxProjection,
+  requested: FxPoint, layoutVersion: number, measured: boolean, density: number, space: string): FxGeometrySnapshot {
+  return {instanceId:0,layoutVersion:layoutVersion,measured:measured,coordinateSpace:space,density:density,
+    viewport:{size:{width:input.viewport.size.width,height:input.viewport.size.height},insets:{
+      left:input.viewport.insets.left,top:input.viewport.insets.top,right:input.viewport.insets.right,bottom:input.viewport.insets.bottom}},
+    content:{width:input.content.width,height:input.content.height},
+    requestedPosition:{x:requested.x,y:requested.y},position:{x:position.x,y:position.y},
+    projection:{position:{x:projection.position.x,y:projection.position.y},
+      visibleSize:{width:projection.visibleSize.width,height:projection.visibleSize.height},
+      contentOffset:{x:projection.contentOffset.x,y:projection.contentOffset.y}}};
 }

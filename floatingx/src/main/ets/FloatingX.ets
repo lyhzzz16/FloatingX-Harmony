@@ -4,7 +4,7 @@ import { FxRegistry } from './core/FxRegistry';
 import { FxError } from './core/FxError';
 import { FxConfig } from './core/FxConfig';
 import { FxState, FxEventType, FxEventCallback, FxLogger, FxPlatform, FxScope } from './core/FxPlatform';
-import { FxSize } from './core/FxTypes';
+import { FxSize, FxGeometrySnapshot, FxLayoutListener } from './core/FxTypes';
 import { FxContent, contentSource } from './component/FxContent';
 import { FxScopePlatform, FxInteractions } from './scope/FxScopePlatform';
 import { bindScopeHost, releaseScopeHost } from './scope/FxHostBinding';
@@ -17,6 +17,8 @@ import { FxStorage, positionStorageKey } from './storage/FxStorage';
 import { FxGeometryInput } from './geometry/FxGeometry';
 
 export interface FxControlHandle {
+  getGeometrySnapshot(): FxGeometrySnapshot | undefined;
+  subscribeLayout(listener: FxLayoutListener): () => void;
   show(): Promise<void>; hide(): Promise<void>; cancel(): Promise<void>;
   move(x: number,y: number,animate?: boolean): Promise<void>;
   moveByVector(x: number,y: number,animate?: boolean): Promise<void>;
@@ -34,29 +36,47 @@ export interface FxAppOptions<T extends Object> extends FxContentOptions<T> {
 }
 export interface FxSystemFallback { host: FxWindowHost; pagePolicy?: FxPagePolicy; }
 export interface FxSystemOptions<T extends Object> extends FxContentOptions<T> {
-  tag: string; context: common.UIAbilityContext; size: FxSize; fallback?: FxSystemFallback; storage?: FxInstallStorageOptions;
+  tag: string; context: common.UIAbilityContext; size: FxSize; viewportHost?: FxWindowHost; fallback?: FxSystemFallback; storage?: FxInstallStorageOptions;
 }
 /** Retain the factory result to update content without erasing its parameter type. */
 export class FxControl<T extends Object> implements FxControlHandle {
   private controller: FxController; private content: FxContent<T>;
   private release: () => void;
+  private contentRevision: number = 0;
   constructor(controller: FxController, content: FxContent<T>, release: () => void) {
     this.controller=controller;this.content=content;this.release=release;
   }
   show(): Promise<void> { return this.controller.show(); }
-  hide(): Promise<void> { return this.controller.hide(); }
-  async cancel(): Promise<void> { try { await this.controller.cancel(); } finally { this.release();releaseScopeHost(this); } }
+  hide(): Promise<void> { this.contentRevision++;this.content.cancelLayout('LAYOUT_CANCELED');return this.controller.hide(); }
+  async cancel(): Promise<void> { this.contentRevision++;this.content.cancelLayout('DESTROYED');try { await this.controller.cancel(); } finally { this.release();releaseScopeHost(this); } }
   move(x: number,y: number,animate: boolean = false): Promise<void> { return this.controller.move(x,y,animate); }
   moveByVector(x: number,y: number,animate: boolean = false): Promise<void> { return this.controller.moveByVector(x,y,animate); }
   updateConfig(config: FxConfig): Promise<void> { return this.controller.updateConfig(config); }
   clearPosition(): Promise<void> { return this.controller.clearPosition(); }
   async updateContent(params: T): Promise<void> {
+    this.contentRevision++;
     const generation=this.controller.getGeneration();
     const alive=() => generation===this.controller.getGeneration() && this.controller.getState()!==FxState.DESTROYING && this.controller.getState()!==FxState.DESTROYED;
     if(!alive()) throw new FxError('DESTROYED','FloatingX control has been destroyed');
     await this.content.update(params,alive);
     if(!alive()) throw new FxError('DESTROYED','Content update was canceled');
   }
+  /** Applies parameters, waits for a fresh measured native layout and System projection, then returns detached geometry. */
+  async updateContentAndWaitForLayout(params: T): Promise<FxGeometrySnapshot> {
+    if(!this.controller.isLayoutReady())throw new FxError('NO_HOST','Layout completion requires mounted content; use show with layoutOnly for invisible measurement');
+    const revision=++this.contentRevision;
+    const generation=this.controller.getGeneration();
+    const valid=() => generation===this.controller.getGeneration() && this.controller.getState()!==FxState.DESTROYING && this.controller.getState()!==FxState.DESTROYED;
+    const contentCurrent=await this.content.updateAndWait(params,valid);
+    await this.controller.flushGeometry();
+    if(!valid())throw new FxError('DESTROYED','Content layout was canceled');
+    if(revision!==this.contentRevision || !contentCurrent())throw new FxError('LAYOUT_SUPERSEDED','Content layout was superseded');
+    const result=this.getGeometrySnapshot();
+    if(result===undefined || !result.measured)throw new FxError('NO_HOST','No applied content geometry');
+    return result;
+  }
+  getGeometrySnapshot(): FxGeometrySnapshot | undefined {return this.controller.getGeometrySnapshot();}
+  subscribeLayout(listener: FxLayoutListener): () => void {return this.controller.subscribeLayout(listener);}
   getX(): number { return this.controller.getX(); } getY(): number { return this.controller.getY(); }
   isShow(): boolean { return this.controller.isShow(); } getState(): FxState { return this.controller.getState(); }
 }
@@ -87,6 +107,7 @@ function make<T extends Object>(options: FxScopeOptions<T>, config: FxConfig, pl
   let control: FxControl<T>;
   const release=() => { if(tag!==undefined && controls.get(tag)===control) { controls.delete(tag);registry.unregister(tag,controller); } };
   const controller=new FxController(platform,config,(event) => {
+    if(event.type===FxEventType.HIDE || event.type===FxEventType.DETACH)options.content.cancelLayout('LAYOUT_CANCELED');
     if(event.type===FxEventType.DESTROY) {release();releaseScopeHost(control);}
     if(options.events!==undefined)return options.events(event);
   },logger);
@@ -126,7 +147,7 @@ export class FloatingX {
     }
     const source=contentSource(options.content);
     const input: FxGeometryInput={viewport:{size:{width:options.size.width,height:options.size.height},insets:{left:0,top:0,right:0,bottom:0}},content:{width:options.size.width,height:options.size.height},config:config};
-    const platform=new FxSystemPlatform(new FxNativeWindowFactory(options.context,source,options.interactions),input,fallback);
+    const platform=new FxSystemPlatform(new FxNativeWindowFactory(options.context,source,options.interactions,options.viewportHost),input,fallback);
     return make(scoped,config,platform,() => platform.getGeometry(),options.tag);
   }
   static control(tag: string): FxControlHandle { const control=controls.get(tag);if(control===undefined)throw new FxError('NOT_INSTALLED','Float tag is not installed');return control; }

@@ -1,7 +1,18 @@
 import { FxError } from './FxError';
-import { FxPoint, FxInsets, FxGravity, FxEdgeAdsorb, FxDisplayMode, FxAnimationConfig, FxAnimationCurve } from './FxTypes';
+import { FxPoint, FxInsets, FxGravity, FxEdgeAdsorb, FxDisplayMode, FxAnimationConfig, FxAnimationCurve, FxBoundaryMode, FxGestureMode, FxFocusPolicy, FxSafeAreaPolicy } from './FxTypes';
 
 export interface FxConfigOptions {
+  boundaryMode?: FxBoundaryMode;
+  gestureMode?: FxGestureMode;
+  /** ANDROID_2: content owns ordinary taps; parent Pan and its release remain enabled. */
+  contentOwnsTap?: boolean;
+  /** Optional drag threshold in vp. ANDROID_2 resolves an omitted value from the host ArkUI Pan configuration. */
+  touchSlopVp?: number;
+  focusPolicy?: FxFocusPolicy;
+  /** Keep content mounted and allow drawing to advance layout, without presentation or interaction.
+   * The caller clears this flag after content layout and positioning are ready. */
+  layoutOnly?: boolean;
+  safeAreaPolicy?: FxSafeAreaPolicy;
   position?: FxPoint;
   gravity?: FxGravity;
   offset?: FxPoint;
@@ -29,6 +40,13 @@ function requireBoolean(value: boolean, field: string): void {
 
 /** Owns nested option copies. copy() revalidates modifications before handing them to a controller. */
 export class FxConfig {
+  boundaryMode: FxBoundaryMode;
+  gestureMode: FxGestureMode;
+  contentOwnsTap: boolean;
+  touchSlopVp?: number;
+  focusPolicy: FxFocusPolicy;
+  layoutOnly: boolean;
+  safeAreaPolicy: FxSafeAreaPolicy;
   position?: FxPoint;
   gravity: FxGravity;
   offset: FxPoint;
@@ -43,6 +61,13 @@ export class FxConfig {
   clickIntervalMs: number;
 
   constructor(options: FxConfigOptions = {}) {
+    this.safeAreaPolicy = options.safeAreaPolicy === undefined ? FxSafeAreaPolicy.HOST : options.safeAreaPolicy;
+    this.layoutOnly = options.layoutOnly === undefined ? false : options.layoutOnly;
+    this.gestureMode = options.gestureMode === undefined ? FxGestureMode.LEGACY : options.gestureMode;
+    this.contentOwnsTap = options.contentOwnsTap === undefined ? false : options.contentOwnsTap;
+    this.touchSlopVp = options.touchSlopVp;
+    this.focusPolicy = options.focusPolicy === undefined ? FxFocusPolicy.DEFAULT : options.focusPolicy;
+    this.boundaryMode = options.boundaryMode === undefined ? FxBoundaryMode.CONTENT : options.boundaryMode;
     if (options.position !== undefined) this.position = { x: options.position.x, y: options.position.y };
     this.gravity = options.gravity === undefined ? FxGravity.TOP_LEFT : options.gravity;
     this.offset = options.offset === undefined ? { x: 0, y: 0 } : { x: options.offset.x, y: options.offset.y };
@@ -61,6 +86,17 @@ export class FxConfig {
   }
 
   validate(): void {
+    if(![FxSafeAreaPolicy.HOST,FxSafeAreaPolicy.AVOID_SYSTEM,FxSafeAreaPolicy.EXTEND].includes(this.safeAreaPolicy))throw new FxError('INVALID_CONFIG','Unknown safeAreaPolicy');
+    requireBoolean(this.layoutOnly, 'layoutOnly');
+    if (this.gestureMode !== FxGestureMode.LEGACY && this.gestureMode !== FxGestureMode.ANDROID_2) throw new FxError('INVALID_CONFIG', 'Unknown gestureMode');
+    requireBoolean(this.contentOwnsTap, 'contentOwnsTap');
+    if (this.contentOwnsTap && this.gestureMode !== FxGestureMode.ANDROID_2) throw new FxError('INVALID_CONFIG', 'contentOwnsTap requires ANDROID_2');
+    if (this.focusPolicy !== FxFocusPolicy.DEFAULT && this.focusPolicy !== FxFocusPolicy.NON_FOCUSABLE) throw new FxError('INVALID_CONFIG', 'Unknown focusPolicy');
+    if (this.touchSlopVp !== undefined) {
+      requireNonnegative(this.touchSlopVp, 'touchSlopVp');
+      if (this.touchSlopVp === 0) throw new FxError('INVALID_CONFIG', 'touchSlopVp must be positive');
+    }
+    if (this.boundaryMode !== FxBoundaryMode.CONTENT && this.boundaryMode !== FxBoundaryMode.ANDROID_2) throw new FxError('INVALID_CONFIG', 'Unknown boundaryMode');
     if (this.position !== undefined) {
       requireFinite(this.position.x, 'position.x'); requireFinite(this.position.y, 'position.y');
     }
@@ -89,7 +125,8 @@ export class FxConfig {
 
   copy(): FxConfig {
     const options: FxConfigOptions = {
-      position: this.position, gravity: this.gravity, offset: this.offset, margin: this.margin,
+      safeAreaPolicy: this.safeAreaPolicy, layoutOnly: this.layoutOnly, gestureMode: this.gestureMode, contentOwnsTap: this.contentOwnsTap, touchSlopVp: this.touchSlopVp, focusPolicy: this.focusPolicy,
+      boundaryMode: this.boundaryMode, position: this.position, gravity: this.gravity, offset: this.offset, margin: this.margin,
       displayMode: this.displayMode, adsorb: this.adsorb, edgeAdsorb: this.edgeAdsorb, rebound: this.rebound,
       halfHide: this.halfHide, halfHideRatio: this.halfHideRatio, animation: this.animation,
       clickIntervalMs: this.clickIntervalMs

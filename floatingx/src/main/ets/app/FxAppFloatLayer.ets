@@ -14,7 +14,7 @@ function appLayer(params: FxAppLayerParams) {
   }
   .width('100%').height('100%').align(Alignment.TopStart)
   .hitTestBehavior(HitTestMode.Transparent)
-  .onAreaChange((_old: Area, area: Area) => params.platform.layoutHost({width:Number(area.width),height:Number(area.height)}))
+  .onAreaChange((_old: Area, area: Area) => params.platform.layoutHost({width:Number(area.width),height:Number(area.height)},{x:Number(area.globalPosition.x),y:Number(area.globalPosition.y)}))
 }
 export function createAppLayer(context: UIContext, platform: FxAppPlatform): ComponentContent<FxAppLayerParams> {
   return new ComponentContent<FxAppLayerParams>(context,wrapBuilder(appLayer),new FxAppLayerParams(platform));
