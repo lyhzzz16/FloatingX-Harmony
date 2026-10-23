@@ -12,6 +12,7 @@ export interface FxSystemView {
   cancelAnimations(): void;
   nativeHidden?(): void;
   cancelTouch?(reason: FxTouchCancelReason): void;
+  requestDisallowInterceptTouchEvent?(disallow: boolean): void;
   adoptPosition(point: FxPoint): void;
 }
 export interface FxSystemOwner {

@@ -54,6 +54,9 @@ export class FxAppPlatform implements FxPlatform {
   }
   layoutContent(size: FxSize): void { if(!this.destroyed && this.host.isValid()) this.engine.layoutContent(size); }
   handleTouch(event: TouchEvent, observeOnly: boolean = false): void { if(this.isHostVisible() && this.isReadyToShow()) this.engine.handleTouch(event,observeOnly); }
+  requestDisallowInterceptTouchEvent(disallow: boolean): void {this.engine.requestDisallowInterceptTouchEvent(disallow);}
+  hasPrimaryPointer(): boolean {return this.engine.hasPrimaryPointer();}
+  isInterceptDisallowed(): boolean {return this.engine.isInterceptDisallowed();}
   canStartPan(event: BaseGestureEvent): boolean {return this.engine.canStartPan(event);}
   handlePan(event: GestureEvent, starting: boolean = false): void {this.engine.handlePan(event,starting);}
   completeSurfaceTap(): void {this.engine.completeSurfaceTap();}

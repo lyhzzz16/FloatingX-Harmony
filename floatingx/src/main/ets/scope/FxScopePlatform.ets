@@ -72,6 +72,7 @@ export class FxScopePlatform implements FxPlatform {
   private layoutListeners: FxLayoutListener[] = [];
   private dragged: boolean = false;
   private nativeOwned: boolean = false;
+  private disallowIntercept: boolean = false;
   private panStartTime?: number;
   private activePointerIds: number[] = [];
   private parentTerminal?: FxTouchSnapshot;
@@ -224,6 +225,10 @@ export class FxScopePlatform implements FxPlatform {
     const finish=this.finishAnimation; this.finishAnimation=undefined; if(finish!==undefined) finish();
   }
   hasPrimaryPointer(): boolean {return this.primary!==undefined;}
+  requestDisallowInterceptTouchEvent(disallow: boolean): void {
+    if(this.snapshot.config.gestureMode===FxGestureMode.ANDROID_2 && this.primary!==undefined && !this.nativeOwned)this.disallowIntercept=disallow;
+  }
+  isInterceptDisallowed(): boolean {return this.disallowIntercept;}
   canStartPan(event: BaseGestureEvent): boolean {
     if(this.primary===undefined || this.activePointerIds[0]!==this.primary.id)return false;
     for(let i=0;i<event.fingerList.length;i++) {
@@ -318,6 +323,7 @@ export class FxScopePlatform implements FxPlatform {
     if(event.type===TouchType.Down) {
       if(this.activePointerIds.indexOf(changed.id)>=0)return;
       const secondary=this.activePointerIds.length>0;this.activePointerIds.push(changed.id);
+      if(!secondary)this.disallowIntercept=false;
       if(this.primary!==undefined || secondary && !this.nativeOwned)return;
       // A secondary DOWN delivered by an existing capture must still hit this surface.
       if(secondary && (changed.x<0 || changed.y<0 || changed.x>=this.snapshot.size.width || changed.y>=this.snapshot.size.height))return;
@@ -349,6 +355,7 @@ export class FxScopePlatform implements FxPlatform {
       if(!owned && this.activePointerIds.length>0)return;
     } else if(event.type===TouchType.Cancel)this.activePointerIds=[];
     else return;
+    if(this.activePointerIds.length===0)this.disallowIntercept=false;
     if(this.primary!==undefined && changed!==undefined)this.primary=this.androidPointer(changed,event.timestamp);
     const phase=event.type===TouchType.Cancel?FxTouchPhase.CANCEL:FxTouchPhase.UP;
     let released=this.touchSnapshot(phase,event.type===TouchType.Cancel?FxTouchCancelReason.SYSTEM:undefined);
@@ -375,6 +382,7 @@ export class FxScopePlatform implements FxPlatform {
   /** Terminates the primary pointer once; lifecycle cancellation never settles or clicks. */
   cancelTouch(reason: FxTouchCancelReason = FxTouchCancelReason.HOST_CHANGED): void {
     const event=this.touchSnapshot(FxTouchPhase.CANCEL,reason);
+    this.disallowIntercept=false;
     this.resetTouch();this.nativeOwned=false;this.activePointerIds=[];this.parentTerminal=undefined;this.panStartTime=undefined;this.pendingTap=undefined;this.pendingTapResult=undefined;this.observeTouch(event);
   }
   private resetTouch(): void {

@@ -29,6 +29,7 @@ export interface FxPlatform {
   subscribeLayout?(listener: FxLayoutListener): () => void;
   flushGeometry?(): Promise<void>;
   cancelTouch?(reason: FxTouchCancelReason): void;
+  requestDisallowInterceptTouchEvent?(disallow: boolean): void;
   create(): Promise<void>;
   show(): Promise<void>;
   hide(): Promise<void>;

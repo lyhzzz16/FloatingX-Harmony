@@ -85,6 +85,7 @@ export function loadFloatViewPolicy(sdkApiVersion=26) {
  const device={sdkApiVersion};
  globalThis.HitTestMode={Default:0,Block:1,Transparent:2,None:3,BLOCK_HIERARCHY:4};
  globalThis.GestureJudgeResult={CONTINUE:0,REJECT:1};
+ globalThis.GestureRecognizerState={READY:0,DETECTING:1,PENDING:2,BLOCKED:3,SUCCESSFUL:4,FAILED:5};
  const Module=require('node:module');const original=Module._load;
  Module._load=function(name,...args){if(name==='@ohos.deviceInfo')return {default:device};return original.call(this,name,...args);};
  delete require.cache[destination];

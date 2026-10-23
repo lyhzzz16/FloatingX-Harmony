@@ -7,9 +7,9 @@ loadScopePlatform();
 const {FxFloatView,device}=loadFloatViewPolicy();
 function surface(options={}) {
  const view=new FxFloatView();const config=new FxConfig({gestureMode:'android-2',...options});
- view.platform={getSnapshot:()=>({config,visible:true}),canStartPan:()=>true};return {view,config};
+ view.platform={getSnapshot:()=>({config,visible:true}),canStartPan:()=>true,isInterceptDisallowed:()=>false,handlePan(){}};return {view,config};
 }
-const recognizer=tag=>({getTag:()=>tag,prevented:0,preventBegin(){this.prevented++;}});
+const recognizer=(tag,state=GestureRecognizerState.DETECTING)=>({getTag:()=>tag,getState:()=>state,prevented:0,preventBegin(){this.prevented++;}});
 const touchRecognizer=id=>({getEventTargetInfo:()=>({getId:()=>id}),cancelled:0,cancelTouch(){this.cancelled++;}});
 test('content-owned parent Tap rejects before competing child cancellation; normal Tap remains available',()=>{
  const {view,config}=surface({contentOwnsTap:true});const child=recognizer('child');const touch=touchRecognizer('child');
@@ -55,4 +55,19 @@ test('hidden and prepared surfaces reject recognition without canceling children
   visible=true;config.layoutOnly=false;
   assert.equal(view.hitTestMode(0),displayMode==='display-only'?HitTestMode.None:gestureMode==='legacy'?HitTestMode.Transparent:HitTestMode.BLOCK_HIERARCHY);
  }
+});
+
+test('successful native child retains terminal delivery; only undecided recognizers are prevented',()=>{
+ const {view}=surface();const successful=recognizer('long',GestureRecognizerState.SUCCESSFUL),failed=recognizer('failed',GestureRecognizerState.FAILED),pending=recognizer('tap');
+ view.judge({},recognizer(view.surfaceId+'x'),[successful,failed,pending]);
+ assert.equal(successful.prevented,0);assert.equal(failed.prevented,0);assert.equal(pending.prevented,1);
+});
+test('disallow does not cancel child or reject parallel pan; revocation can take over without a synthetic DOWN',()=>{
+ const {view}=surface();let disallowed=true;let starts=[];
+ view.platform.isInterceptDisallowed=()=>disallowed;view.platform.handlePan=(_e,starting)=>starts.push(starting);
+ const child=recognizer('child'),touch=touchRecognizer('child');
+ assert.equal(view.judge({},recognizer(view.surfaceId+'x'),[child],[touch]),GestureJudgeResult.CONTINUE);
+ view.pan({},true);view.pan({});assert.deepEqual(starts,[]);assert.equal(child.prevented,0);assert.equal(touch.cancelled,0);
+ disallowed=false;view.pan({});view.pan({});
+ assert.deepEqual(starts,[true,false]);assert.equal(child.prevented,1);assert.equal(touch.cancelled,1);
 });

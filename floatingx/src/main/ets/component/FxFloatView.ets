@@ -9,6 +9,8 @@ export interface FxFloatViewAdapter {
   layoutContent(size: FxSize): void;
   handleTouch(event: TouchEvent, observeOnly?: boolean): void;
   canStartPan(event: BaseGestureEvent): boolean;
+  isInterceptDisallowed(): boolean;
+  hasPrimaryPointer(): boolean;
   handlePan(event: GestureEvent, starting?: boolean): void;
   completeSurfaceTap(): void;
 }
@@ -18,6 +20,9 @@ export struct FxFloatView {
   platform: FxFloatViewAdapter = new FxScopePlatform();
   @Prop revision: number = 0;
   private claimedAxis: string = '';
+  private pendingAxis: string = '';
+  private pendingRecognizers: GestureRecognizer[] = [];
+  private pendingTouches: TouchRecognizer[] = [];
   private surfaceId: string = 'FloatingXSurface_'+(++surfaceSequence).toString();
   // Snapshot is adapter-owned, so every ArkUI expression must observe its revision.
   private currentSnapshot(_revision: number): FxScopeSnapshot { return this.platform.getSnapshot(); }
@@ -38,18 +43,38 @@ export struct FxFloatView {
     if(current.getTag()!==this.surfaceId+'x' && current.getTag()!==this.surfaceId+'y')return GestureJudgeResult.CONTINUE;
     if(this.currentSnapshot(this.revision).config.displayMode!==FxDisplayMode.Normal)return GestureJudgeResult.REJECT;
     if(!this.platform.canStartPan(event))return GestureJudgeResult.REJECT;
-    if(this.claimedAxis!=='' && this.claimedAxis!==current.getTag())return GestureJudgeResult.REJECT;
-    this.claimedAxis=current.getTag();
-    // Only a successful axis recognizer takes ownership. Native children receive CANCEL,
-    // and pending clicks/page pans cannot later win this same pointer stream.
-    for(let i=0;i<others.length;i++) {
-      if(others[i].getTag()!==this.surfaceId+'x' && others[i].getTag()!==this.surfaceId+'y')others[i].preventBegin();
-    }
-    if(touches!==undefined)for(let i=0;i<touches.length;i++) {
-      if(touches[i].getEventTargetInfo().getId()!==this.surfaceId)touches[i].cancelTouch();
-    }
+    if(this.pendingAxis!=='' && this.pendingAxis!==current.getTag())return GestureJudgeResult.REJECT;
+    this.pendingAxis=current.getTag();this.pendingRecognizers=others;this.pendingTouches=touches===undefined?[]:touches;
+    // Keep native recognition alive while disallowed: the child may revoke its request on a later MOVE.
+    this.claimPan(event);
     return GestureJudgeResult.CONTINUE;
   }
+  private claimPan(event: BaseGestureEvent): boolean {
+    if(this.claimedAxis!=='')return true;
+    if(this.pendingAxis==='' || this.platform.isInterceptDisallowed() || !this.platform.canStartPan(event))return false;
+    this.claimedAxis=this.pendingAxis;
+    for(let i=0;i<this.pendingRecognizers.length;i++) {
+      const recognizer=this.pendingRecognizers[i];
+      if(recognizer.getTag()===this.surfaceId+'x' || recognizer.getTag()===this.surfaceId+'y')continue;
+      const state=recognizer.getState();
+      // preventBegin can silence terminal events of an already successful recognizer on ArkUI.
+      if(state!==GestureRecognizerState.SUCCESSFUL && state!==GestureRecognizerState.FAILED)recognizer.preventBegin();
+    }
+    for(let i=0;i<this.pendingTouches.length;i++) {
+      if(this.pendingTouches[i].getEventTargetInfo().getId()!==this.surfaceId)this.pendingTouches[i].cancelTouch();
+    }
+    this.pendingRecognizers=[];this.pendingTouches=[];
+    return true;
+  }
+  private pan(event: GestureEvent, starting: boolean = false): void {
+    const wasClaimed=this.claimedAxis!=='';
+    if(!this.claimPan(event))return;
+    this.platform.handlePan(event,starting || !wasClaimed);
+  }
+  private resetPan(): void {
+    this.claimedAxis='';this.pendingAxis='';this.pendingRecognizers=[];this.pendingTouches=[];
+  }
+  aboutToDisappear(): void {this.resetPan();}
   @Builder
   private content() {
     Stack({ alignContent: Alignment.TopStart }) {
@@ -70,23 +95,26 @@ export struct FxFloatView {
               .height(this.currentSnapshot(this.revision).projection.visibleSize.height)
               .parallelGesture(PanGesture({direction:PanDirection.Horizontal,distance:this.currentSnapshot(this.revision).config.touchSlopVp!})
                 .tag(this.surfaceId+'x')
-                .onActionStart((event: GestureEvent) => this.platform.handlePan(event,true))
-                .onActionUpdate((event: GestureEvent) => this.platform.handlePan(event)))
+                .onActionStart((event: GestureEvent) => this.pan(event,true))
+                .onActionUpdate((event: GestureEvent) => this.pan(event)))
               .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, current: GestureRecognizer, others: GestureRecognizer[], touches?: TouchRecognizer[]) => this.judge(_event,current,others,touches))
           }
             .id(this.surfaceId)
             .width(this.currentSnapshot(this.revision).projection.visibleSize.width)
             .height(this.currentSnapshot(this.revision).projection.visibleSize.height)
             .onTouchIntercept((event: TouchEvent) => {
-              if(event.type===TouchType.Down){if(event.touches.length<=1)this.claimedAxis='';this.platform.handleTouch(event,true);}
+              if(event.type===TouchType.Down){if(event.touches.length<=1)this.resetPan();this.platform.handleTouch(event,true);}
               return HitTestMode.Default;
             })
-            .onTouch((event: TouchEvent) => this.platform.handleTouch(event,true))
+            .onTouch((event: TouchEvent) => {
+              this.platform.handleTouch(event,true);
+              if(event.type===TouchType.Cancel || event.type===TouchType.Up && !this.platform.hasPrimaryPointer())this.resetPan();
+            })
             .gesture(TapGesture().tag(this.surfaceId+'tap').onAction(() => this.platform.completeSurfaceTap()))
             .parallelGesture(PanGesture({direction:PanDirection.Vertical,distance:this.currentSnapshot(this.revision).config.touchSlopVp!})
               .tag(this.surfaceId+'y')
-              .onActionStart((event: GestureEvent) => this.platform.handlePan(event,true))
-              .onActionUpdate((event: GestureEvent) => this.platform.handlePan(event)))
+              .onActionStart((event: GestureEvent) => this.pan(event,true))
+              .onActionUpdate((event: GestureEvent) => this.pan(event)))
             .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, current: GestureRecognizer, others: GestureRecognizer[], touches?: TouchRecognizer[]) => this.judge(_event,current,others,touches))
         } else {
           this.content()

@@ -62,6 +62,9 @@ export class FxSystemPageView implements FxSystemView {
   }
   layoutContent(size: FxSize): void {this.engine.layoutContent(size);}
   handleTouch(event: TouchEvent, observeOnly: boolean = false): void {if(event.type===TouchType.Down && !this.engine.hasPrimaryPointer())this.owner.cancelAnimations();this.engine.handleTouch(event,observeOnly);}
+  requestDisallowInterceptTouchEvent(disallow: boolean): void {this.engine.requestDisallowInterceptTouchEvent(disallow);}
+  hasPrimaryPointer(): boolean {return this.engine.hasPrimaryPointer();}
+  isInterceptDisallowed(): boolean {return this.engine.isInterceptDisallowed();}
   canStartPan(event: BaseGestureEvent): boolean {return this.engine.canStartPan(event);}
   handlePan(event: GestureEvent, starting: boolean = false): void {this.engine.handlePan(event,starting);}
   completeSurfaceTap(): void {this.engine.completeSurfaceTap();}
