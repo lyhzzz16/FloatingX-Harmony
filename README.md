@@ -1,12 +1,12 @@
 # FloatingX-Harmony
 
-> 本 fork 提供 `0.1.1-yb.6` Android 2.3.7 对齐预览版：见 [源码证据与 API 契约](docs/android-parity.md)、[本轮透明预布局修复](docs/render-layout.md) 和 [HAR 接入、发布及验收](docs/fork-release-validation.md)。原默认边界/手势保留，新模式须显式开启。下方上游文档与 GIF 不代表本预览版已通过真机验收。
+> 本 fork 的正式版本为 **0.2.0**，使用标准语义版本，不附加业务后缀。基于 Android FloatingX 2.3.7 进行平台适配；正式版不表示所有 Android 行为均已等价。能力范围、已验证用例与已知限制见 [0.2.0 发布说明](docs/releases/0.2.0.md)，维护与下载见 [发布指南](docs/guide/发布版本.md)。
 
 **FloatingX-Harmony** 是原生 ArkTS / ArkUI 悬浮窗库，提供局部浮窗、应用内浮窗和受平台权限约束的系统浮窗。以一个 HAR 接入，最低兼容 **HarmonyOS 5.0.0（API 12）**。
 
 Android 版：[FloatingX](https://github.com/Petterpx/FloatingX)（Kotlin / Java / Jetpack Compose）。两端共享浮窗使用思路，使用各自平台的 API。
 
-[使用文档](https://github.com/Petterpx/FloatingX-Harmony/wiki) · [快速开始](https://github.com/Petterpx/FloatingX-Harmony/wiki/快速开始) · [API 速查](https://github.com/Petterpx/FloatingX-Harmony/wiki/API-速查) · [版本下载](https://github.com/Petterpx/FloatingX-Harmony/releases)
+[使用文档](docs/guide/Home.md) · [快速开始](docs/guide/快速开始.md) · [API 速查](docs/guide/API-速查.md) · [版本下载](https://github.com/lyhzzz16/FloatingX-Harmony/releases)
 
 ## 特性
 
@@ -27,11 +27,11 @@ Android 版：[FloatingX](https://github.com/Petterpx/FloatingX)（Kotlin / Java
 | --- | --- |
 | ![局部浮窗演示](assets/gifs/scope-demo.gif) | ![应用内浮窗演示](assets/gifs/app-demo.gif) |
 
-系统浮窗需要目标平台授予受限权限；模拟器表现不能代表商业手机 / 平板可取得该权限。接入前请阅读[系统浮窗](https://github.com/Petterpx/FloatingX-Harmony/wiki/系统浮窗)。
+系统浮窗需要目标平台授予受限权限；模拟器表现不能代表商业手机 / 平板可取得该权限。接入前请阅读[系统浮窗](docs/guide/系统浮窗.md)。
 
 ## 安装
 
-当前**尚未发布到 OHPM 仓库**，从 [GitHub Releases](https://github.com/Petterpx/FloatingX-Harmony/releases) 下载 HAR：
+当前**尚未发布到 OHPM 仓库**，从 [GitHub Releases](https://github.com/lyhzzz16/FloatingX-Harmony/releases) 下载 HAR：
 
 1. 下载对应版本的 `floatingx-vX.Y.Z.har`；可用同版本的 `SHA256SUMS` 校验文件。
 2. 将文件重命名为 `floatingx.har` 并放进应用模块的 `libs/` 目录。
@@ -45,9 +45,9 @@ Android 版：[FloatingX](https://github.com/Petterpx/FloatingX)（Kotlin / Java
 }
 ```
 
-也可用 DevEco Studio 打开源码，在 `floatingx` 模块执行 `assembleHar`。Release 中的示例 HAP 使用 OpenHarmony API 12 编译且未签名；商业 HarmonyOS 设备请使用自己的 SDK 和签名构建 `entry` 示例，见[发布与下载](https://github.com/Petterpx/FloatingX-Harmony/wiki/发布版本)。
+也可用 DevEco Studio 打开源码，在 `floatingx` 模块执行 `assembleHar`。0.2.0 Release 的示例 HAP 使用 HarmonyOS SDK 构建且未签名；设备运行需配置自己的调试签名。实际 SDK 与构建模式见随包 manifest，见[发布与下载](docs/guide/发布版本.md)。
 
-库的公开入口是 `floatingx`。局部 / 应用内浮窗不需要声明系统浮窗权限；仅系统浮窗消费者按平台要求声明权限。详细步骤见[快速开始](https://github.com/Petterpx/FloatingX-Harmony/wiki/快速开始)。
+库的公开入口是 `floatingx`。局部 / 应用内浮窗不需要声明系统浮窗权限；仅系统浮窗消费者按平台要求声明权限。详细步骤见[快速开始](docs/guide/快速开始.md)。
 
 ## 快速开始
 
@@ -115,18 +115,18 @@ struct Index {
 }
 ```
 
-`show()` 接受显示请求；宿主挂载并完成布局后才实际显示。需要判断可见性时使用 `isShow()` 或 `SHOW` 事件。更多模式见 使用文档中的[应用内浮窗](https://github.com/Petterpx/FloatingX-Harmony/wiki/应用内浮窗)和[系统浮窗](https://github.com/Petterpx/FloatingX-Harmony/wiki/系统浮窗)。
+`show()` 接受显示请求；宿主挂载并完成布局后才实际显示。需要判断可见性时使用 `isShow()` 或 `SHOW` 事件。更多模式见 使用文档中的[应用内浮窗](docs/guide/应用内浮窗.md)和[系统浮窗](docs/guide/系统浮窗.md)。
 
 ## 文档与示例
 
-- [快速开始](https://github.com/Petterpx/FloatingX-Harmony/wiki/快速开始) — HAR 安装与完整最小示例
-- [局部浮窗](https://github.com/Petterpx/FloatingX-Harmony/wiki/局部浮窗) — 组件宿主与重挂
-- [应用内浮窗](https://github.com/Petterpx/FloatingX-Harmony/wiki/应用内浮窗) — WindowStage、页面黑白名单
-- [系统浮窗](https://github.com/Petterpx/FloatingX-Harmony/wiki/系统浮窗) — 权限、显式降级与释放
-- [配置与交互](https://github.com/Petterpx/FloatingX-Harmony/wiki/配置与交互) — 定位、吸附、半隐藏、动画与手势
-- [位置存储](https://github.com/Petterpx/FloatingX-Harmony/wiki/位置存储) — 内存、Preferences 与恢复
-- [API 速查](https://github.com/Petterpx/FloatingX-Harmony/wiki/API-速查) — 控制器、事件与错误
-- [常见问题](https://github.com/Petterpx/FloatingX-Harmony/wiki/常见问题) · [Android 迁移](https://github.com/Petterpx/FloatingX-Harmony/wiki/Android-迁移)
+- [快速开始](docs/guide/快速开始.md) — HAR 安装与完整最小示例
+- [局部浮窗](docs/guide/局部浮窗.md) — 组件宿主与重挂
+- [应用内浮窗](docs/guide/应用内浮窗.md) — WindowStage、页面黑白名单
+- [系统浮窗](docs/guide/系统浮窗.md) — 权限、显式降级与释放
+- [配置与交互](docs/guide/配置与交互.md) — 定位、吸附、半隐藏、动画与手势
+- [位置存储](docs/guide/位置存储.md) — 内存、Preferences 与恢复
+- [API 速查](docs/guide/API-速查.md) — 控制器、事件与错误
+- [常见问题](docs/guide/常见问题.md) · [Android 迁移](docs/guide/Android-迁移.md)
 
 仓库 `entry` 模块提供完整可运行示例，可在 DevEco Studio 中运行：
 

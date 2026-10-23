@@ -68,6 +68,10 @@ export class FxSystemPlatform implements FxPlatform {
     for(let i=0;i<listeners.length;i++) {try{listeners[i](this.getGeometrySnapshot());}catch(_){if(this.controller!==undefined)this.controller.reportCallbackFailure();}}
   }
   async flushGeometry(): Promise<void> {if(this.fallback!==undefined && this.fallback.flushGeometry!==undefined)await this.fallback.flushGeometry();await this.frameCompletion;await this.layoutCompletion;await this.tail;this.assertAlive();}
+  requestDisallowInterceptTouchEvent(disallow: boolean): void {
+    if(this.fallback!==undefined)this.fallback.requestDisallowInterceptTouchEvent?.(disallow);
+    else this.view?.requestDisallowInterceptTouchEvent?.(disallow);
+  }
   cancelTouch(reason: FxTouchCancelReason): void {
     if(this.view!==undefined && this.view.cancelTouch!==undefined)this.view.cancelTouch(reason);
     if(this.fallback!==undefined && this.fallback.cancelTouch!==undefined)this.fallback.cancelTouch(reason);

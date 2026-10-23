@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.petterp.floatingx.sample",
     "vendor": "petterp",
-    "versionCode": 10006,
-    "versionName": "0.1.1-yb.6",
+    "versionCode": 10007,
+    "versionName": "0.2.0",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }

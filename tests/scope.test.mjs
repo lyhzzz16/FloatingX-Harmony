@@ -421,3 +421,20 @@ test('stale parent Tap microtask cannot erase a newer sequence pending release',
  }
  await Promise.resolve();assert.equal(releases,1);await s.controller.cancel();
 });
+
+test('disallow is per control/sequence, revocable, and resets on final UP, CANCEL or hide',async()=>{
+ const first=await setup({gestureMode:'android-2'}),other=await setup({gestureMode:'android-2'});
+ first.controller.requestDisallowInterceptTouchEvent(true);assert.equal(first.platform.isInterceptDisallowed(),false);
+ first.platform.handleTouch(touch(0,1,10,10,0),true);
+ first.controller.requestDisallowInterceptTouchEvent(true);assert.equal(first.platform.isInterceptDisallowed(),true);assert.equal(other.platform.isInterceptDisallowed(),false);
+ first.platform.handleTouch(touch(0,2,10,10,1),true);first.platform.handleTouch(touch(1,2,10,10,2),true);
+ assert.equal(first.platform.isInterceptDisallowed(),true);
+ first.controller.requestDisallowInterceptTouchEvent(false);assert.equal(first.platform.isInterceptDisallowed(),false);
+ first.controller.requestDisallowInterceptTouchEvent(true);first.platform.handleTouch(touch(1,1,10,10,3),true);assert.equal(first.platform.isInterceptDisallowed(),false);
+ for(const end of ['cancel','hide']) {
+  first.platform.handleTouch(touch(0,1,10,10,4),true);first.controller.requestDisallowInterceptTouchEvent(true);
+  if(end==='cancel')first.platform.handleTouch(touch(3,1,10,10,5),true);else await first.controller.hide();
+  assert.equal(first.platform.isInterceptDisallowed(),false);
+ }
+ await first.controller.cancel();await other.controller.cancel();
+});

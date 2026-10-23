@@ -233,6 +233,10 @@ export class FxController {
     const platform=this.requirePlatform();if(platform.flushGeometry!==undefined)await platform.flushGeometry();
     this.assertAlive(generation);
   }
+  requestDisallowInterceptTouchEvent(disallow: boolean): void {
+    if(this.state===FxState.DESTROYING || this.state===FxState.DESTROYED)return;
+    this.platform?.requestDisallowInterceptTouchEvent?.(disallow);
+  }
   cancelTouch(reason: FxTouchCancelReason): void {
     if(this.platform!==undefined && this.platform.cancelTouch!==undefined)this.platform.cancelTouch(reason);
   }

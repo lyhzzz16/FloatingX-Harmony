@@ -1,12 +1,10 @@
-name: Release assets
+name: Legacy API 12 release assets
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing published Release tag (vX.Y.Z or vX.Y.Z-prerelease)
+        description: Legacy API 12 compatible tag only (not the 0.2.x HarmonyOS release)
         required: true
         type: string
 

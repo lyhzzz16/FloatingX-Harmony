@@ -17,6 +17,10 @@ import { FxStorage, positionStorageKey } from './storage/FxStorage';
 import { FxGeometryInput } from './geometry/FxGeometry';
 
 export interface FxControlHandle {
+  /** ANDROID_2 only; ignored outside a touch sequence or after parent takeover.
+   * @param disallow true prevents takeover; false allows a later MOVE to take over. Reset on final UP/CANCEL or lifecycle interruption.
+   */
+  requestDisallowInterceptTouchEvent(disallow: boolean): void;
   getGeometrySnapshot(): FxGeometrySnapshot | undefined;
   subscribeLayout(listener: FxLayoutListener): () => void;
   show(): Promise<void>; hide(): Promise<void>; cancel(): Promise<void>;
@@ -46,6 +50,7 @@ export class FxControl<T extends Object> implements FxControlHandle {
   constructor(controller: FxController, content: FxContent<T>, release: () => void) {
     this.controller=controller;this.content=content;this.release=release;
   }
+  requestDisallowInterceptTouchEvent(disallow: boolean): void {this.controller.requestDisallowInterceptTouchEvent(disallow);}
   show(): Promise<void> { return this.controller.show(); }
   hide(): Promise<void> { this.contentRevision++;this.content.cancelLayout('LAYOUT_CANCELED');return this.controller.hide(); }
   async cancel(): Promise<void> { this.contentRevision++;this.content.cancelLayout('DESTROYED');try { await this.controller.cancel(); } finally { this.release();releaseScopeHost(this); } }
