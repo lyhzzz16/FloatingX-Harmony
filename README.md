@@ -1,6 +1,6 @@
 # FloatingX-Harmony
 
-> 本 fork 的正式版本为 **0.2.0**，使用标准语义版本，不附加业务后缀。基于 Android FloatingX 2.3.7 进行平台适配；正式版不表示所有 Android 行为均已等价。能力范围、已验证用例与已知限制见 [0.2.0 发布说明](docs/releases/0.2.0.md)，维护与下载见 [发布指南](docs/guide/发布版本.md)。
+> 本 fork 的正式版本为 **0.2.1**，使用标准语义版本，不附加业务后缀。基于 Android FloatingX 2.3.7 进行平台适配；正式版不表示所有 Android 行为均已等价。能力范围、已验证用例与已知限制见 [0.2.1 发布说明](docs/releases/0.2.1.md)，维护与下载见 [发布指南](docs/guide/发布版本.md)。
 
 **FloatingX-Harmony** 是原生 ArkTS / ArkUI 悬浮窗库，提供局部浮窗、应用内浮窗和受平台权限约束的系统浮窗。以一个 HAR 接入，最低兼容 **HarmonyOS 5.0.0（API 12）**。
 
@@ -45,7 +45,7 @@ Android 版：[FloatingX](https://github.com/Petterpx/FloatingX)（Kotlin / Java
 }
 ```
 
-也可用 DevEco Studio 打开源码，在 `floatingx` 模块执行 `assembleHar`。0.2.0 Release 的示例 HAP 使用 HarmonyOS SDK 构建且未签名；设备运行需配置自己的调试签名。实际 SDK 与构建模式见随包 manifest，见[发布与下载](docs/guide/发布版本.md)。
+也可用 DevEco Studio 打开源码，在 `floatingx` 模块执行 `assembleHar`。0.2.1 Release 的示例 HAP 使用 HarmonyOS SDK 构建且未签名；设备运行需配置自己的调试签名。实际 SDK 与构建模式见随包 manifest，见[发布与下载](docs/guide/发布版本.md)。
 
 库的公开入口是 `floatingx`。局部 / 应用内浮窗不需要声明系统浮窗权限；仅系统浮窗消费者按平台要求声明权限。详细步骤见[快速开始](docs/guide/快速开始.md)。
 

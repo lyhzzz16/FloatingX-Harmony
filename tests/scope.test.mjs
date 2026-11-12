@@ -349,6 +349,46 @@ test('Android parent secondary UP resets helper but later physical UP still rele
  s.platform.handleTouch(touch(0,1,100,100,10),true);s.platform.handleTouch(touch(0,2,105,100,11),true);
  s.platform.handleTouch(touch(1,2,105,100,12),true);s.platform.handleTouch(touch(1,1,100,100,13),true);assert.equal(releases.length,2);await s.controller.cancel();
 });
+for(const shape of ['dense','sparse','undefined'])for(const axis of ['x','y'])test('Android '+axis+' pan preserves the selected pointer with '+shape+' finger entries',async()=>{
+ const releases=[];let clicks=0;
+ const s=await setup({gestureMode:'android-2',touchSlopVp:8,position:{x:20,y:20}},
+  {onRelease:e=>{releases.push(e);return 'default';},onClick:()=>clicks++});
+ const fingers=distance=>{
+  const finger={id:2,globalX:100+(axis==='x'?distance:0),globalY:100+(axis==='y'?distance:0)};
+  if(shape==='dense')return [finger];
+  if(shape==='undefined')return [undefined,undefined,finger,undefined];
+  const list=[];list[2]=finger;return list;
+ };
+ s.platform.handleTouch(touch(0,2,100,100,0),true);
+ assert.equal(s.platform.canStartPan({fingerList:fingers(7)}),false);
+ const start={fingerList:fingers(8),timestamp:10000000};
+ assert.equal(s.platform.canStartPan(start),true);s.platform.handlePan(start,true);
+ assert.deepEqual(s.platform.getPosition(),{x:20,y:20});
+ s.platform.handlePan({fingerList:fingers(20),timestamp:20000000});
+ assert.deepEqual(s.platform.getPosition(),{x:axis==='x'?40:20,y:axis==='y'?40:20});
+ s.platform.handleTouch(touch(1,2,axis==='x'?120:100,axis==='y'?120:100,30),true);
+ assert.equal(releases.length,1);assert.equal(releases[0].pointerId,2);assert.equal(clicks,0);
+ await s.controller.cancel();
+});
+test('Android pan ignores missing lists and absent primary fingers without switching ownership or moving',async()=>{
+ let drags=0,releases=0;
+ const s=await setup({gestureMode:'android-2',touchSlopVp:8,position:{x:20,y:20}},
+  {onDrag:()=>drags++,onRelease:()=>{releases++;return 'default';}});
+ s.platform.handleTouch(touch(0,2,100,100,0),true);
+ s.platform.handlePan({timestamp:1000000},true);assert.equal(s.platform.nativeOwned,false);
+ for(const fingerList of [undefined,[],new Array(3),[undefined,{id:1,globalX:300,globalY:300}]]) {
+  assert.equal(s.platform.canStartPan({fingerList}),false);
+  s.platform.handlePan({fingerList,timestamp:2000000});
+  assert.equal(s.platform.nativeOwned,false);assert.equal(s.platform.primary.id,2);
+  assert.deepEqual(s.platform.getPosition(),{x:20,y:20});
+ }
+ assert.equal(drags,0);assert.equal(releases,0);
+ const next={fingerList:[,,{id:2,globalX:120,globalY:100}],timestamp:3000000};
+ assert.equal(s.platform.canStartPan(next),true);s.platform.handlePan(next,true);
+ s.platform.handlePan({...next,timestamp:4000000});
+ assert.deepEqual(s.platform.getPosition(),{x:40,y:20});assert.equal(drags,1);
+ await s.controller.cancel();
+});
 test('Android secondary motion cannot satisfy the selected action-pointer interception check',async()=>{
  const s=await setup({gestureMode:'android-2',touchSlopVp:8});s.platform.handleTouch(touch(0,1,100,100,0),true);s.platform.handleTouch(touch(0,2,110,100,1),true);
  assert.equal(s.platform.canStartPan({fingerList:[{id:2,globalX:300,globalY:100},{id:1,globalX:100,globalY:100}]}),false);
