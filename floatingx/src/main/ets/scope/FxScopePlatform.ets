@@ -230,9 +230,9 @@ export class FxScopePlatform implements FxPlatform {
   }
   isInterceptDisallowed(): boolean {return this.disallowIntercept;}
   canStartPan(event: BaseGestureEvent): boolean {
-    if(this.primary===undefined || this.activePointerIds[0]!==this.primary.id)return false;
+    if(this.primary===undefined || event.fingerList===undefined || this.activePointerIds[0]!==this.primary.id)return false;
     for(let i=0;i<event.fingerList.length;i++) {
-      const finger=event.fingerList[i];if(finger.id!==this.primary.id)continue;
+      const finger=event.fingerList[i];if(finger===undefined || finger.id!==this.primary.id)continue;
       return this.touch.shouldIntercept({id:finger.id,x:this.boundary?.displayPointers?finger.displayX:finger.globalX,
         y:this.boundary?.displayPointers?finger.displayY:finger.globalY,timeMs:0});
     }
@@ -240,14 +240,14 @@ export class FxScopePlatform implements FxPlatform {
   }
   /** Native recognizers arbitrate ownership; raw DOWN remains observable before child dispatch. */
   handlePan(event: GestureEvent, starting: boolean = false): void {
-    if(this.primary===undefined || !this.snapshot.visible || this.snapshot.config.layoutOnly || this.snapshot.config.displayMode!==FxDisplayMode.Normal)return;
+    if(this.primary===undefined || event.fingerList===undefined || !this.snapshot.visible || this.snapshot.config.layoutOnly || this.snapshot.config.displayMode!==FxDisplayMode.Normal)return;
     if(starting) {
       this.nativeOwned=true;this.panStartTime=event.timestamp;return;
     }
     if(this.panStartTime!==undefined && event.timestamp===this.panStartTime)return;
     if(this.activePointerIds.length>0 && this.activePointerIds[0]!==this.primary.id)return;
     for(let i=0;i<event.fingerList.length;i++) {
-      const finger=event.fingerList[i];if(finger.id!==this.primary.id)continue;
+      const finger=event.fingerList[i];if(finger===undefined || finger.id!==this.primary.id)continue;
       this.nativeOwned=true;
       this.primary={id:finger.id,x:this.boundary?.displayPointers?finger.displayX:finger.globalX,
         y:this.boundary?.displayPointers?finger.displayY:finger.globalY,timeMs:event.timestamp/1000000};
